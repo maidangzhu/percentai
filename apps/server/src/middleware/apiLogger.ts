@@ -1,0 +1,72 @@
+import type { MiddlewareHandler } from "hono";
+import { elapsedMs, logError, logInfo } from "../lib/appLogger.js";
+import { sanitizeForLog } from "../lib/logSanitizer.js";
+
+function headersForLog(headers: Headers) {
+  const output: Record<string, string> = {};
+  for (const [key, value] of headers.entries()) {
+    output[key] = value;
+  }
+  return sanitizeForLog(output);
+}
+
+async function requestBodyForLog(request: Request) {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) return undefined;
+  if (!contentType.includes("application/json")) {
+    return contentType ? { skipped: true, content_type: contentType } : undefined;
+  }
+  return sanitizeForLog(await request.clone().json().catch(() => ({ unreadable: true })));
+}
+
+async function responseBodyForLog(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    return contentType ? { skipped: true, content_type: contentType } : undefined;
+  }
+  return sanitizeForLog(await response.clone().json().catch(() => ({ unreadable: true })));
+}
+
+export function apiLogger(): MiddlewareHandler {
+  return async (c, next) => {
+    const startedAt = Date.now();
+    const traceId = c.req.header("x-trace-id") ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    c.set("traceId", traceId);
+
+    const url = new URL(c.req.url);
+    const query = Object.fromEntries(url.searchParams.entries());
+    const requestBody = await requestBodyForLog(c.req.raw);
+
+    logInfo("http.request", {
+      trace_id: traceId,
+      method: c.req.method,
+      path: c.req.path,
+      query,
+      headers: headersForLog(c.req.raw.headers),
+      body: requestBody,
+    });
+
+    try {
+      await next();
+    } catch (error) {
+      logError("http.error", {
+        trace_id: traceId,
+        method: c.req.method,
+        path: c.req.path,
+        error,
+        duration_ms: elapsedMs(startedAt),
+      });
+      throw error;
+    }
+
+    logInfo("http.response", {
+      trace_id: traceId,
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+      body: await responseBodyForLog(c.res),
+      duration_ms: elapsedMs(startedAt),
+    });
+  };
+}
+

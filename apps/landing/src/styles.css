@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+/* ── Pure black/white. No accent colors. ─────────────────────── */
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0 0 0);
+  --muted: oklch(0.965 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --border: oklch(0.9 0 0);
+  --border-soft: oklch(0.92 0 0);
+  --ink-bg: oklch(0.13 0 0);
+  --ink-fg: oklch(0.98 0 0);
+  --ink-muted: oklch(0.6 0 0);
+  --ink-border: oklch(1 0 0 / 0.1);
+
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: "Fraunces", ui-serif, Georgia, Cambria, "Times New Roman", serif;
+
+  --radius: 0.5rem;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0, 2);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-ink-bg: var(--ink-bg);
+  --color-ink-fg: var(--ink-fg);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-border: var(--ink-border);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv11" 1;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  body {
+    margin: 0;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  ::selection {
+    background: oklch(0 0 0);
+    color: oklch(1 0 0);
+  }
+}
+
+@layer utilities {
+  .font-sans { font-family: var(--font-sans); }
+  .font-mono { font-family: var(--font-mono); }
+  .font-serif { font-family: var(--font-serif); }
+
+  .text-display {
+    font-family: var(--font-sans);
+    letter-spacing: -0.028em;
+    font-feature-settings: "ss01" 1, "cv11" 1, "tnum" 1;
+  }
+
+  .text-mono-caps {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+    font-size: 11px;
+  }
+
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes blink-cursor {
+  0%, 50%   { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+@keyframes cursor-pulse {
+  0%, 100% { transform: scaleY(1); opacity: 1; }
+  50%      { transform: scaleY(0.6); opacity: 0.55; }
+}
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+
+.animate-fade-in-up { animation: fade-in-up 0.5s var(--ease-out) both; }
+.animate-fade-in    { animation: fade-in 0.4s var(--ease-out) both; }
+.animate-cursor     { animation: cursor-pulse 1.2s var(--ease-in-out) infinite; }
+.animate-float      { animation: float-slow 6s var(--ease-in-out) infinite; }
+
+.stagger > * { animation: fade-in-up 0.5s var(--ease-out) both; }
+.stagger > *:nth-child(1) { animation-delay: 0.04s; }
+.stagger > *:nth-child(2) { animation-delay: 0.10s; }
+.stagger > *:nth-child(3) { animation-delay: 0.16s; }
+.stagger > *:nth-child(4) { animation-delay: 0.22s; }
+.stagger > *:nth-child(5) { animation-delay: 0.28s; }
+.stagger > *:nth-child(6) { animation-delay: 0.34s; }
+.stagger > *:nth-child(7) { animation-delay: 0.40s; }
+.stagger > *:nth-child(8) { animation-delay: 0.46s; }
+.stagger > *:nth-child(9) { animation-delay: 0.52s; }

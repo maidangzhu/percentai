@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/auth-prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ---- Credit / Points ----
+// Credits are account-scoped, so they live in the cloud auth database instead
+// of the local SQLite app database.
+
+model UserCredit {
+  id           String              @id
+  userId       String              @unique @map("user_id")
+  balance      Int                 @default(0)
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  transactions CreditTransaction[]
+
+  @@index([userId])
+  @@map("user_credits")
+}
+
+model CreditTransaction {
+  id           String     @id
+  userId       String     @map("user_id")
+  delta        Int
+  balanceAfter Int        @map("balance_after")
+  reason       String
+  refType      String?    @map("ref_type")
+  refId        String?    @map("ref_id")
+  metadata     String?
+  createdAt    DateTime   @default(now()) @map("created_at")
+  credit       UserCredit @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("credit_transactions")
+}

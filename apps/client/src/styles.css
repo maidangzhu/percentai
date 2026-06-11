@@ -1,0 +1,214 @@
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ── Pure black/white. No accent colors. ─────────────────────── */
+
+:root {
+  --background: oklch(1 0 0);                    /* #FFFFFF */
+  --foreground: oklch(0 0 0);                    /* #000000 */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0 0 0);
+  --primary: oklch(0 0 0);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0 0 0);
+  --muted: oklch(0.96 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.96 0 0);
+  --accent-foreground: oklch(0 0 0);
+  --destructive: oklch(0.45 0 0);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.9 0 0);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0 0 0);
+  --sidebar: oklch(0.98 0 0);
+  --sidebar-foreground: oklch(0 0 0);
+  --sidebar-border: oklch(0.92 0 0);
+
+  /* dark surface tokens — used for the bubble window panels */
+  --ink-bg: oklch(0.13 0 0);
+  --ink-fg: oklch(0.98 0 0);
+  --ink-muted: oklch(0.6 0 0);
+  --ink-border: oklch(1 0 0 / 0.10);
+
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --radius: 0.5rem;
+
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0, 2);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
+}
+
+.dark {
+  --background: oklch(0.13 0 0);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.16 0 0);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.16 0 0);
+  --popover-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.98 0 0);
+  --primary-foreground: oklch(0.13 0 0);
+  --secondary: oklch(0.22 0 0);
+  --secondary-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.22 0 0);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.22 0 0);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.55 0 0);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 0.10);
+  --input: oklch(1 0 0 / 0.15);
+  --ring: oklch(0.98 0 0);
+  --sidebar: oklch(0.13 0 0);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(1 0 0 / 0.10);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+    outline-color: color-mix(in oklch, var(--color-ring) 50%, transparent);
+  }
+
+  html,
+  body {
+    background-color: transparent;
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv11" 1;
+  }
+
+  /* The main window sets a real background on its root; the bubble window stays transparent. */
+  body { overflow: hidden; }
+
+  #root { background-color: transparent; }
+
+  /* Main-window root provides the white surface explicitly. */
+  .app-main { background-color: var(--color-background); }
+
+  .font-display {
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01" 1, "cv11" 1, "tnum" 1;
+    letter-spacing: -0.025em;
+  }
+}
+
+@keyframes panel-pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bubble-pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+@keyframes bubble-spin { to { transform: rotate(360deg); } }
+@keyframes thinking-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40%           { opacity: 1;    transform: scale(1); }
+}
+@keyframes progress-countdown {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+@layer utilities {
+  .font-sans { font-family: var(--font-sans); }
+  .font-mono { font-family: var(--font-mono); }
+
+  .text-display {
+    font-family: var(--font-sans);
+    letter-spacing: -0.025em;
+    font-feature-settings: "ss01" 1, "cv11" 1, "tnum" 1;
+  }
+
+  .text-mono-caps {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+  }
+
+  .animate-panel-pop-in { animation: panel-pop-in 0.18s var(--ease-out); }
+  .animate-fade-in-up { animation: fade-in-up 0.32s var(--ease-out) both; }
+  .animate-fade-in { animation: fade-in 0.24s var(--ease-out) both; }
+  .animate-bubble-spin { animation: bubble-spin 0.85s linear infinite; }
+  .animate-bubble-pulse { animation: bubble-pulse 0.32s var(--ease-out); }
+  .animate-progress-countdown { animation: progress-countdown 6.5s linear forwards; }
+
+  .stagger > * { animation: fade-in-up 0.36s var(--ease-out) both; }
+  .stagger > *:nth-child(1) { animation-delay: 0.02s; }
+  .stagger > *:nth-child(2) { animation-delay: 0.05s; }
+  .stagger > *:nth-child(3) { animation-delay: 0.08s; }
+  .stagger > *:nth-child(4) { animation-delay: 0.11s; }
+  .stagger > *:nth-child(5) { animation-delay: 0.14s; }
+  .stagger > *:nth-child(6) { animation-delay: 0.17s; }
+  .stagger > *:nth-child(7) { animation-delay: 0.20s; }
+  .stagger > *:nth-child(8) { animation-delay: 0.23s; }
+  .stagger > *:nth-child(9) { animation-delay: 0.26s; }
+  .stagger > *:nth-child(10) { animation-delay: 0.29s; }
+
+  .thinking-dots > span {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 9999px;
+    background: currentColor;
+    animation: thinking-dot 1.4s ease-in-out infinite;
+  }
+  .thinking-dots > span:nth-child(2) { animation-delay: 0.16s; }
+  .thinking-dots > span:nth-child(3) { animation-delay: 0.32s; }
+}
+
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: var(--border); border-radius: 9999px; }

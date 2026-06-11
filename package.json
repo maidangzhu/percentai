@@ -1,0 +1,16 @@
+{
+  "name": "percent",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm --parallel --filter percent-server --filter percent-tracker --filter percent-cms dev",
+    "client": "pnpm --filter percent-tracker dev",
+    "server": "pnpm --filter percent-server dev",
+    "landing": "pnpm --filter percent-landing dev",
+    "cms": "pnpm --filter percent-cms dev"
+  }
+}

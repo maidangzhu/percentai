@@ -1,0 +1,96 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "percent-tracker",
+  "version": "0.1.0",
+  "identifier": "com.percent-tracker.app",
+  "build": {
+    "beforeDevCommand": "pnpm run dev:vite",
+    "beforeBuildCommand": "pnpm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "bubble",
+        "url": "/bubble",
+        "title": "Percent Tracker",
+        "width": 480,
+        "height": 600,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "decorations": false,
+        "transparent": true,
+        "acceptFirstMouse": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visibleOnAllWorkspaces": true,
+        "shadow": false,
+        "center": false,
+        "x": 0,
+        "y": 0
+      },
+      {
+        "label": "chat",
+        "url": "/chat",
+        "title": "Percent · Chat",
+        "width": 480,
+        "height": 640,
+        "minWidth": 360,
+        "minHeight": 400,
+        "resizable": true,
+        "maximizable": false,
+        "minimizable": true,
+        "closable": true,
+        "decorations": true,
+        "transparent": false,
+        "acceptFirstMouse": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": false,
+        "visibleOnAllWorkspaces": true,
+        "shadow": true,
+        "center": false,
+        "visible": false,
+        "focus": true
+      },
+      {
+        "label": "main",
+        "url": "/main",
+        "title": "Percent Tracker",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "decorations": true,
+        "transparent": false,
+        "visible": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
+  }
+}
