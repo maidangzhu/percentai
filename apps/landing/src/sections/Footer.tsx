@@ -34,16 +34,16 @@ export function Footer() {
         <FooterCol
           title="开发"
           items={[
-            { label: "GitHub", href: "https://github.com/maidangzhu/percent" },
+            { label: "GitHub", href: "https://github.com/maidangzhu/percentai" },
             { label: "产品流程", href: "/docs/product-flows" },
-            { label: "Changelog", href: "https://github.com/maidangzhu/percent/releases" },
+            { label: "Changelog", href: "https://github.com/maidangzhu/percentai/releases" },
           ]}
         />
         <FooterCol
           title="联系"
           items={[
-            { label: "Issues", href: "https://github.com/maidangzhu/percent/issues" },
-            { label: "Discussions", href: "https://github.com/maidangzhu/percent/discussions" },
+            { label: "Issues", href: "https://github.com/maidangzhu/percentai/issues" },
+            { label: "Discussions", href: "https://github.com/maidangzhu/percentai/discussions" },
           ]}
         />
       </div>

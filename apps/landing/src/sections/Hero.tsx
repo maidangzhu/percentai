@@ -53,7 +53,7 @@ export function Hero() {
               </span>
             </a>
             <a
-              href="https://github.com/maidangzhu/percent"
+              href="https://github.com/maidangzhu/percentai"
               className="inline-flex items-center gap-2 rounded-md border border-[color:var(--color-border)] bg-background px-5 py-2.5 text-[14px] font-medium text-foreground transition-colors hover:bg-muted"
             >
               <Github size={15} strokeWidth={1.75} />

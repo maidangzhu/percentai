@@ -30,7 +30,7 @@ export function TopNav() {
             隐私
           </a>
           <a
-            href="https://github.com/maidangzhu/percent"
+            href="https://github.com/maidangzhu/percentai"
             className="hidden items-center gap-1 rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
           >
             源码

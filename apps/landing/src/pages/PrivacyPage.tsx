@@ -245,10 +245,10 @@ export function PrivacyPage() {
           <li>
             GitHub:{" "}
             <a
-              href="https://github.com/maidangzhu/percent"
+              href="https://github.com/maidangzhu/percentai"
               className="text-foreground underline-offset-4 hover:underline"
             >
-              github.com/maidangzhu/percent
+              github.com/maidangzhu/percentai
             </a>
           </li>
         </ul>
