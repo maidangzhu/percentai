@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "pnpm --parallel --filter percent-server --filter percent --filter percent-cms dev",
+    "dev": "pnpm --parallel --filter percent-server --filter percent --filter percent-cms --filter percent-landing dev",
     "client": "pnpm --filter percent dev",
     "server": "pnpm --filter percent-server dev",
     "landing": "pnpm --filter percent-landing dev",
