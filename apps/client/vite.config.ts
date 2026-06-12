@@ -19,26 +19,4 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
-  build: {
-    rollupOptions: {
-      external: [
-        "node:fs",
-        "node:path",
-        "node:os",
-        "node:crypto",
-        "fs",
-        "path",
-        "os",
-        "crypto",
-        /^@prisma\/client/,
-        /^@prisma\/adapter-/,
-        "better-sqlite3",
-        /^\.\.\/generated\/prisma\//,
-        /^\.\/generated\/prisma\//,
-      ],
-    },
-  },
-  optimizeDeps: {
-    exclude: ["@prisma/client", "@prisma/adapter-better-sqlite3", "better-sqlite3"],
-  },
 }));

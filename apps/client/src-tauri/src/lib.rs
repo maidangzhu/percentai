@@ -13,6 +13,7 @@ mod screenshotter;
 mod permissions;
 mod ax_capture;
 mod shell_tools;
+mod db;
 
 use keyboard::{start_keyboard_listener, ShortcutConfig};
 use logger::LogStore;
@@ -541,6 +542,33 @@ pub fn run() {
             test_capture_screenshot,
             shell_tools::run_bash,
             shell_tools::read_local_file,
+            // ── local sqlite (diesel-backed) ──
+            db::commands::db_list_logs,
+            db::commands::db_list_logs_with_last_turn,
+            db::commands::db_create_log,
+            db::commands::db_list_people,
+            db::commands::db_get_person,
+            db::commands::db_create_person,
+            db::commands::db_delete_person,
+            db::commands::db_list_tasks,
+            db::commands::db_get_task,
+            db::commands::db_get_task_by_fingerprint,
+            db::commands::db_create_task,
+            db::commands::db_update_task,
+            db::commands::db_delete_task,
+            db::commands::db_get_stats,
+            db::commands::db_list_agent_sessions,
+            db::commands::db_get_agent_session,
+            db::commands::db_create_agent_session,
+            db::commands::db_delete_agent_session,
+            db::commands::db_append_agent_message,
+            db::commands::db_batch_append_agent_messages,
+            db::commands::db_create_chat_turn,
+            db::commands::db_batch_insert_chat_messages,
+            db::commands::db_purge_all_logs,
+            db::commands::db_purge_all_people,
+            db::commands::db_purge_all_tasks,
+            db::commands::db_get_db_path,
         ])
         .setup(|app| {
             // macOS: 不显示 Dock 图标
@@ -548,6 +576,11 @@ pub fn run() {
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
+
+            // 初始化本地 SQLite (Diesel)
+            let db_state = db::init();
+            app.manage(db_state);
+            eprintln!("[db] local sqlite initialized at {}", db::commands::db_get_db_path());
 
             setup_windows(app);
             start_keyboard_listener(app.handle().clone());

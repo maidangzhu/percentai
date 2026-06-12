@@ -24,6 +24,8 @@ dirs = "5"
 device_query = "2"
 dotenvy = "0.15"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+diesel = { version = "2.2", features = ["sqlite"] }
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

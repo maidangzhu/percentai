@@ -70,7 +70,7 @@
         "closable": true,
         "decorations": true,
         "transparent": false,
-        "visible": false,
+        "visible": true,
         "center": true
       }
     ],

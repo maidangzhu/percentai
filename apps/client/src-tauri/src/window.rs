@@ -68,6 +68,14 @@ pub fn setup_windows(app: &App) {
     let _ = bubble.set_ignore_cursor_events(false);
     start_bubble_hit_test_listener(app.handle().clone());
 
+    // dev mode: auto-open devtools for the bubble webview so we can see
+    // console errors (the transparent window otherwise hides whether
+    // the React tree even rendered).
+    #[cfg(debug_assertions)]
+    {
+        let _ = bubble.open_devtools();
+    }
+
     #[cfg(target_os = "macos")]
     {
         set_window_level(&bubble, 25);
