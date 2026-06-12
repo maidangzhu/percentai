@@ -4,10 +4,9 @@ import { cors } from "hono/cors";
 import { authGuard } from "./middleware/authGuard.js";
 import { apiLogger } from "./middleware/apiLogger.js";
 import { gatewayErrorHandler, responseGateway } from "./middleware/responseGateway.js";
-import { agentRouter } from "./routes/agent.js";
-import { analyzeRouter } from "./routes/analyze.js";
+import { agentStreamRouter } from "./routes/agentStream.js";
+import { chatRouter } from "./routes/chat.js";
 import { creditsRouter } from "./routes/credits.js";
-import { suggestRouter } from "./routes/suggest.js";
 
 type AppAuth = Parameters<typeof authGuard>[0] & {
   handler: (request: Request) => Response | Promise<Response>;
@@ -46,12 +45,15 @@ export async function createApp(auth: AppAuth) {
 
   app.get("/health", (c) => c.json({ ok: true, ts: new Date().toISOString() }));
 
-  // LLM routes — stateless proxies. Client pre-fetches context (people, tasks,
-  // messages) from its local SQLite and sends it in the request body; we just
-  // call the provider and return the parsed LLM response. No server-side DB.
-  app.route("/analyze", analyzeRouter);
-  app.route("/suggest", suggestRouter);
-  app.route("/agent", agentRouter);
+  // LLM routes — single stateless chat endpoint. Client composes the
+  // system prompt + messages (with optional base64 image) and sends
+  // them; we forward to the provider and return the raw text.
+  app.route("/chat", chatRouter);
+
+  // Streaming proxy for the agent runtime (`streamPercentProxy` in
+  // @percent/runtime). Mounted at /agent so the client hits
+  // /agent/model/stream.
+  app.route("/agent", agentStreamRouter);
 
   // Cloud-only endpoints (auth + credits).
   app.route("/credits", creditsRouter);

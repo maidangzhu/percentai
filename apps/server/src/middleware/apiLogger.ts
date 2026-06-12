@@ -15,7 +15,42 @@ async function requestBodyForLog(request: Request) {
   if (!contentType.includes("application/json")) {
     return contentType ? { skipped: true, content_type: contentType } : undefined;
   }
-  return await request.clone().json().catch(() => ({ unreadable: true }));
+  const body = await request.clone().json().catch(() => ({ unreadable: true }));
+  return redactSecrets(body);
+}
+
+/**
+ * Strip large / secret fields before logging so a `pnpm dev` run doesn't
+ * dump the entire screenshot base64 (and any future api_key / token)
+ * to stderr on every request.
+ */
+function redactSecrets(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    const key = k.toLowerCase();
+    if (
+      key === "image_base64" ||
+      key === "image" ||
+      key === "screenshot" ||
+      key === "api_key" ||
+      key === "apikey" ||
+      key.endsWith("_base64") ||
+      key === "data" ||
+      key === "password" ||
+      key === "token"
+    ) {
+      if (typeof v === "string") {
+        out[k] = v.length > 80 ? `[redacted ${v.length} chars]` : "[redacted]";
+      } else {
+        out[k] = "[redacted]";
+      }
+    } else {
+      out[k] = redactSecrets(v);
+    }
+  }
+  return out;
 }
 
 async function responseBodyForLog(response: Response) {
@@ -63,7 +98,7 @@ export function apiLogger(): MiddlewareHandler {
       method: c.req.method,
       path: c.req.path,
       status: c.res.status,
-      body: await responseBodyForLog(c.res),
+      body: redactSecrets(await responseBodyForLog(c.res)),
       duration_ms: elapsedMs(startedAt),
     });
   };
