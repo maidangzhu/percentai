@@ -74,17 +74,17 @@ function ChatPanel({ step }: { step: number }) {
           <span className="h-2.5 w-2.5 rounded-full bg-[oklch(0.8_0_0)]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[oklch(0.85_0_0)]" />
         </div>
-        <div className="text-mono-caps text-muted-foreground">微信 · 老婆</div>
+        <div className="text-mono-caps text-muted-foreground">微信 · 对象</div>
         <div className="w-12" />
       </div>
 
       {/* chat header */}
       <div className="flex items-center gap-3 border-b border-[color:var(--color-border)] px-4 py-3">
         <div className="grid h-9 w-9 place-items-center rounded-full bg-foreground font-mono text-[12px] font-medium text-background">
-          妻
+          对
         </div>
         <div className="min-w-0">
-          <div className="text-[14px] font-medium leading-tight">老婆</div>
+          <div className="text-[14px] font-medium leading-tight">对象</div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <span className="relative inline-flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[oklch(0.55_0.15_140)] opacity-60" />
@@ -108,7 +108,7 @@ function ChatPanel({ step }: { step: number }) {
                 className="flex items-end gap-2"
               >
                 <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-muted font-mono text-[10px] font-medium text-foreground">
-                  妻
+                  对
                 </div>
                 <div className="max-w-[78%] rounded-2xl rounded-bl-md bg-muted px-3.5 py-2 text-[13.5px] leading-relaxed text-foreground">
                   {m.text}
