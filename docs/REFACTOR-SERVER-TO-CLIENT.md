@@ -105,17 +105,16 @@ const completion = await openai.chat.completions.create({ ... })
 - [x] 写本规划文档
 - [x] 确认 client 当前零本地 DB、零 prisma
 
-### Stage 1 — schema + 基础数据层移到 client
-- [ ] `apps/client/prisma/schema.prisma` 新建(从 server 复制)
-- [ ] `apps/client/prisma/migrations/` 复制过来
-- [ ] `apps/client/prisma.config.ts` 新建
-- [ ] `apps/client/src/db/client.ts` 新建(从 server 复制)
-- [ ] `apps/client/src/db/init.ts` 新建(从 server 复制)
-- [ ] `apps/client/src/lib/paths.ts` 新建(从 server 复制)
-- [ ] `apps/client/package.json` 加 prisma / @prisma/client / @prisma/adapter-better-sqlite3 / better-sqlite3 依赖
-- [ ] `apps/client/package.json` 加 `prisma:generate` / `prisma:db:push` scripts
-- [ ] `pnpm install` 在 client 跑通,生成 Prisma client
-- [ ] **不删 server 端任何东西**,先两边共存,client 生成自己的 client
+### Stage 1 — schema + prisma 类型生成 到 client ✅
+- [x] `apps/client/prisma/schema.prisma` 复制 (140 行)
+- [x] `apps/client/prisma.config.ts` 复制
+- [x] (migrations 目录不存在 — server 用 `prisma db push` 不维护 migration)
+- [x] `apps/client/package.json` 加 prisma devDep + @prisma/client dep
+- [x] `apps/client/package.json` 加 `prisma:generate` / `prisma:db:push` scripts
+- [x] `pnpm install` + `pnpm prisma:generate` 跑通,Prisma client 7.8.0 生成
+- [x] **commit**: `fe0c...` (Stage 1 完成)
+
+**注意**: Prisma 运行时(`@prisma/client` + `better-sqlite3`)不能直接跑在 Tauri 2 webview 里(webview 沙箱,没有 Node.js fs/原生模块)。所以 **Stage 1 只是把 schema + 类型基建搬过去**,**不搬运行时 Prisma client**。运行时 DB 操作走 Stage 6 的 Tauri plugin / commands。
 
 ### Stage 2 — 业务 lib 移到 client
 - [ ] `apps/client/src/lib/taskService.ts` 从 server 复制
