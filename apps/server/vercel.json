@@ -1,4 +1,6 @@
 {
-  "buildCommand": "pnpm run build",
-  "installCommand": "cp ../../pnpm-lock.yaml . && pnpm install --frozen-lockfile"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "pnpm --filter percent-server run build",
+  "installCommand": "pnpm install --frozen-lockfile"
 }
