@@ -4,7 +4,9 @@ import { Check, Loader2 } from "./icons";
 
 type Message = {
   id: string;
+  from: "them" | "me";
   text: string;
+  time: string;
 };
 
 type Task = {
@@ -15,8 +17,9 @@ type Task = {
 };
 
 const MESSAGES: Message[] = [
-  { id: "m1", text: "晚上回家记得去超市买点菜" },
-  { id: "m2", text: "对了明天下午 3 点你来接一下娃" },
+  { id: "m1", from: "them", text: "晚上回家记得去超市买点菜", time: "14:32" },
+  { id: "m2", from: "them", text: "对了今天看看猫粮还够不够，不够的话买一袋", time: "14:32" },
+  { id: "m3", from: "me", text: "好嘞", time: "14:33" },
 ];
 
 const TASKS: Task[] = [
@@ -28,15 +31,24 @@ const TASKS: Task[] = [
   },
   {
     id: "t2",
-    text: "3 点接娃",
-    due: "明天下午",
-    evidence: "明天下午 3 点你来接一下娃",
+    text: "看猫粮，不够买一袋",
+    due: "今天",
+    evidence: "对了今天看看猫粮还够不够，不够的话买一袋",
   },
 ];
 
-// ms to wait at each step before advancing
-const STEP_DELAYS = [400, 1000, 1000, 800, 1000, 500, 500, 2000] as const;
-const HOLD_BEFORE_RESET_MS = 2500;
+// Animation steps:
+//   0  initial (them messages already visible, no bubble, no tasks panel)
+//   1  user pressed Enter → "好嘞" message appears in chat
+//   2  bubble pops in (Percent captured the screen, surfaces the catch)
+//   3  bubble is processing
+//   4  tasks panel slides in (still loading)
+//   5  task 1 in
+//   6  task 2 in
+//   7  hold
+//   8  reset
+const STEP_DELAYS = [1000, 1000, 1000, 1000, 500, 500, 1500, 1500] as const;
+const HOLD_BEFORE_RESET_MS = 2000;
 
 const EASE_OUT = [0.2, 0, 0, 1] as const;
 const EASE_SPRING = [0.34, 1.56, 0.64, 1] as const;
@@ -85,51 +97,40 @@ function ChatPanel({ step }: { step: number }) {
         </div>
         <div className="min-w-0">
           <div className="text-[14px] font-medium leading-tight">对象</div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span className="relative inline-flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[oklch(0.55_0.15_140)] opacity-60" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[oklch(0.55_0.15_140)]" />
-            </span>
-            WeChat · 在线
-          </div>
+          <div className="text-[11px] text-muted-foreground">WeChat</div>
         </div>
       </div>
 
       {/* messages */}
       <div className="relative flex-1 space-y-2.5 overflow-hidden px-4 py-5">
-        <AnimatePresence>
-          {MESSAGES.map((m, i) =>
-            step > i ? (
-              <motion.div
-                key={m.id}
-                initial={{ opacity: 0, y: 10, scale: 0.97 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ duration: 0.4, ease: EASE_OUT }}
-                className="flex items-end gap-2"
-              >
-                <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-muted font-mono text-[10px] font-medium text-foreground">
-                  对
-                </div>
-                <div className="max-w-[78%] rounded-2xl rounded-bl-md bg-muted px-3.5 py-2 text-[13.5px] leading-relaxed text-foreground">
-                  {m.text}
-                </div>
-                <span className="ml-auto pb-0.5 font-mono text-[10px] tabular-nums text-muted-foreground/55">
-                  14:32
-                </span>
-              </motion.div>
-            ) : null,
-          )}
-        </AnimatePresence>
+        {MESSAGES.map((m) => {
+          // "them" messages are pre-populated (always visible).
+          // "me" message animates in after the user presses Enter (step >= 1).
+          if (m.from === "them") {
+            return <Message key={m.id} msg={m} />;
+          }
+          if (step < 1) return null;
+          return (
+            <motion.div
+              key={m.id}
+              initial={{ opacity: 0, y: 10, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.35, ease: EASE_OUT }}
+            >
+              <Message msg={m} />
+            </motion.div>
+          );
+        })}
       </div>
 
-      {/* input bar */}
+      {/* input bar — Percent captures the screen *because* the user pressed Enter here */}
       <div className="flex items-center gap-2 border-t border-[color:var(--color-border)] bg-muted/30 px-4 py-2.5">
-        <span className="font-mono text-[12px] text-muted-foreground">
-          按住说话
+        <span className="font-mono text-[12.5px] text-muted-foreground/55">
+          回复 对象…
         </span>
         <span className="ml-1 inline-block h-3.5 w-px animate-cursor bg-foreground/70" />
-        <span className="ml-auto text-[10.5px] text-muted-foreground/70">
-          表情 · 语音
+        <span className="ml-auto font-mono text-[10.5px] text-muted-foreground/50">
+          Enter 发送
         </span>
       </div>
 
@@ -139,10 +140,38 @@ function ChatPanel({ step }: { step: number }) {
   );
 }
 
+function Message({ msg }: { msg: Message }) {
+  if (msg.from === "me") {
+    return (
+      <div className="flex items-end justify-end gap-2">
+        <span className="pb-0.5 font-mono text-[10px] tabular-nums text-muted-foreground/55">
+          {msg.time}
+        </span>
+        <div className="max-w-[78%] rounded-2xl rounded-br-md bg-foreground px-3.5 py-2 text-[13.5px] leading-relaxed text-background">
+          {msg.text}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-end gap-2">
+      <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-muted font-mono text-[10px] font-medium text-foreground">
+        对
+      </div>
+      <div className="max-w-[78%] rounded-2xl rounded-bl-md bg-muted px-3.5 py-2 text-[13.5px] leading-relaxed text-foreground">
+        {msg.text}
+      </div>
+      <span className="ml-auto pb-0.5 font-mono text-[10px] tabular-nums text-muted-foreground/55">
+        {msg.time}
+      </span>
+    </div>
+  );
+}
+
 function Bubble({ step }: { step: number }) {
-  const visible = step >= 3;
-  const processing = step >= 4 && step < 5;
-  const done = step >= 5;
+  const visible = step >= 2;
+  const processing = step >= 3 && step < 4;
+  const done = step >= 4;
 
   return (
     <AnimatePresence>
@@ -173,7 +202,7 @@ function Bubble({ step }: { step: number }) {
                     strokeWidth={1.75}
                     className="animate-spin"
                   />
-                  <span>读到 2 个 task</span>
+                  <span>读对话中</span>
                 </motion.div>
               )}
               {done && (
@@ -186,7 +215,7 @@ function Bubble({ step }: { step: number }) {
                   className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12px]"
                 >
                   <Check size={12} strokeWidth={2.25} />
-                  <span>2 个已写入</span>
+                  <span>捞到 2 个</span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -198,7 +227,7 @@ function Bubble({ step }: { step: number }) {
 }
 
 function TasksArea({ step }: { step: number }) {
-  const showTasks = step >= 5;
+  const showTasks = step >= 4;
   return (
     <div className="relative h-full min-h-[360px]">
       <AnimatePresence mode="wait">
@@ -218,7 +247,7 @@ function TasksArea({ step }: { step: number }) {
               tasks
             </div>
             <div className="mt-1.5 text-center text-[12px] text-muted-foreground/65">
-              读到对话后自动出现
+              按 Enter 发送后出现
             </div>
           </motion.div>
         ) : (
@@ -241,7 +270,7 @@ function TasksArea({ step }: { step: number }) {
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
               <AnimatePresence>
                 {TASKS.map((task, i) =>
-                  step > 5 + i ? (
+                  step > 4 + i ? (
                     <TaskCard key={task.id} task={task} />
                   ) : null,
                 )}
