@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" rx="200" fill="#09090b"/>
-  <text x="512" y="610" text-anchor="middle" font-size="500" font-weight="700" fill="white" font-family="system-ui">%</text>
+  <rect width="1024" height="1024" rx="224" fill="#09090b"/>
+  <line x1="700" y1="208" x2="324" y2="816" stroke="#ffffff" stroke-width="96" stroke-linecap="round"/>
+  <circle cx="296" cy="296" r="124" fill="#ffffff"/>
+  <circle cx="728" cy="728" r="124" fill="none" stroke="#ffffff" stroke-width="52"/>
 </svg>
