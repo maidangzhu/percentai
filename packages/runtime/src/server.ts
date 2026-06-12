@@ -6,7 +6,7 @@ import {
   type Model,
   type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import type { PercentProxyEvent } from "./index.ts";
+import type { PercentProxyEvent } from "./index.js";
 
 export interface PercentProxyRequest {
   model: Model<any>;

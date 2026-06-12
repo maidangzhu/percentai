@@ -16,14 +16,14 @@ export {
   type TextContent,
   type ToolResultMessage,
 } from "@earendil-works/pi-ai";
-export { normalizeText, taskTitleSimilarity } from "./taskSimilarity";
+export { normalizeText, taskTitleSimilarity } from "./taskSimilarity.js";
 export {
   buildProviderModel,
   PROVIDER_PRESETS,
   type BuildModelInput,
   type ProviderId,
   type ProviderPreset,
-} from "./providers";
+} from "./providers.js";
 
 import {
   Agent,
