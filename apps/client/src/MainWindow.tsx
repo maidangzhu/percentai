@@ -255,6 +255,7 @@ export default function MainWindow() {
         <PeopleView
           people={peopleQuery.data ?? []}
           onDeletePerson={handleDeletePerson}
+          onRefresh={() => void peopleQuery.refetch()}
         />
       )}
       {activeKey === "tasks" && (

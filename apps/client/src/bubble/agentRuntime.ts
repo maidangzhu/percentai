@@ -1,6 +1,5 @@
 import {
   Type,
-  buildProviderModel,
   createPercentAgent,
   type Agent as RuntimeAgent,
   type AgentMessage as RuntimeAgentMessage,
@@ -8,8 +7,11 @@ import {
   type ImageContent,
   type Message as RuntimeMessage,
 } from "@percent/runtime";
-import { API_BASE, type ApiResponse, type LogRow, type PersonDetail, type PersonSummary, type TaskRow } from "@/lib/types";
-import { resolveByok } from "@/lib/byokConfig";
+import { API_BASE, type TaskRow } from "@/lib/types";
+import { listPeople, getPerson } from "@/db/people";
+import { listLogs } from "@/db/logs";
+import { db } from "@/db/client";
+import { newSnowflakeId } from "@/lib/snowflake";
 import { invoke } from "@tauri-apps/api/core";
 
 export const SCREEN_AGENT_SYSTEM_PROMPT = `
@@ -56,6 +58,12 @@ export const SCREEN_AGENT_SYSTEM_PROMPT = `
 - 一个用户问题可以拆成多个工具调用，最多 5 步。
 - 不要在第一步就把所有信息塞进 prompt；按需取用。
 
+【必须调工具的边界（防止幻觉）】
+- 用户问"今天要干嘛 / 任务 / 联系人 / 最近的聊天"——**必须先调工具**（manage_tasks / manage_people / manage_chats / manage_logs）拿真实数据再答，**不能**只根据截屏文字捏造。
+- 用户说"记一下 / 加个待办"——**必须调 manage_tasks action=create**，仅在工具返回成功后才告诉用户"已加"。
+- 截屏里看到日程 / 出行 / 提醒类信息 → 主动用 manage_tasks 写下来，**不要**只在回复里说"已记好"。
+- 找不到 / 工具返回错误时，**老实说**"没找到 / 调用失败"，不要假装成功。
+
 【主动建议】
 - 当你识别出明确待办信号，可以简短问一句"要不要加个待办？"，等用户确认再 manage_tasks action=create。
 - 当用户对回复犹豫，主动调用 manage_chats action=list 拿 context（可附 tone/intent）然后自己起草。
@@ -70,26 +78,12 @@ export const SCREEN_AGENT_SYSTEM_PROMPT = `
 - 如果一个问题需要的能力你没有，直接说"这个我暂时做不到"。
 `;
 
-async function fetchData<T>(url: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(url, { credentials: "include", ...init });
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
-  }
-  const body = (await resp.json()) as ApiResponse<T>;
-  return body.data;
-}
 
 function asTextResult(details: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(details) }],
     details,
   };
-}
-
-function findPeopleByName(people: PersonSummary[], query?: string) {
-  const trimmed = query?.trim().toLowerCase();
-  if (!trimmed) return people;
-  return people.filter((person) => person.name.toLowerCase().includes(trimmed));
 }
 
 // ── Agent 客户端工具（bash / read_file）───────────────────────────────────
@@ -144,8 +138,8 @@ function bashCommandKey(args: { cmd: string; cwd?: string }): string {
   return JSON.stringify({ cmd: args.cmd, cwd: args.cwd ?? null });
 }
 
-// 根据 BYOK 设置决定 agent 走 server-proxy（默认，扣 credits）还是直连 provider（BYOK，不扣）。
-// 失败 / 未配置 → fallback 到 server-proxy 路径。
+// 所有 LLM 调用都走 server-proxy 模式（default）。server 端持 provider
+// key，client 永远不接触 api_key。
 export async function createAgentForRequest(
   options: {
     sessionId: string;
@@ -153,25 +147,6 @@ export async function createAgentForRequest(
     toolsOptions: ToolsOptions;
   },
 ): Promise<RuntimeAgent> {
-  const byok = await resolveByok().catch(() => null);
-  if (byok) {
-    const model = buildProviderModel({
-      provider: byok.provider,
-      modelId: byok.modelId,
-      modelName: byok.modelName,
-      baseUrl: byok.baseUrl,
-    });
-    return createPercentAgent({
-      apiBase: API_BASE,
-      sessionId: options.sessionId,
-      systemPrompt: SCREEN_AGENT_SYSTEM_PROMPT,
-      tools: createPercentTools(options.toolsOptions),
-      messages: options.history,
-      model,
-      mode: "direct",
-      byokApiKey: byok.apiKey,
-    });
-  }
   return createPercentAgent({
     apiBase: API_BASE,
     sessionId: options.sessionId,
@@ -254,10 +229,9 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
           person_id?: string;
         };
         if (args.action === "list") {
-          const people = await fetchData<PersonSummary[]>(`${API_BASE}/people`);
-          const matches = findPeopleByName(people, args.query).slice(0, args.limit ?? 10);
+          const people = await listPeople({ nameLike: args.query, limit: args.limit ?? 10 });
           return asTextResult({
-            people: matches.map((person) => ({
+            people: people.map((person) => ({
               id: person.id,
               name: person.name,
               client_app: person.client_app,
@@ -270,7 +244,10 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
         if (!args.person_id) {
           return asTextResult({ person: null, error: "person_id required for get" });
         }
-        const person = await fetchData<PersonDetail>(`${API_BASE}/people/${args.person_id}`);
+        const person = await getPerson(args.person_id);
+        if (!person) {
+          return asTextResult({ person: null, error: "person not found" });
+        }
         return asTextResult({
           person: {
             id: person.id,
@@ -322,13 +299,16 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
         if (args.action === "list") {
           let personId = args.person_id;
           if (!personId && args.person_name?.trim()) {
-            const people = await fetchData<PersonSummary[]>(`${API_BASE}/people`);
-            personId = findPeopleByName(people, args.person_name)[0]?.id;
+            const people = await listPeople({ nameLike: args.person_name });
+            personId = people[0]?.id;
           }
           if (!personId) {
             return asTextResult({ person: null, messages: [], error: "person_id or person_name required" });
           }
-          const person = await fetchData<PersonDetail>(`${API_BASE}/people/${personId}`);
+          const person = await getPerson(personId);
+          if (!person) {
+            return asTextResult({ person: null, messages: [], error: "person not found" });
+          }
           const messages = (person.messages ?? [])
             .slice(-(args.limit ?? 30))
             .map((message) => ({
@@ -351,17 +331,15 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
         if (!args.keyword?.trim()) {
           return asTextResult({ matches: [], error: "keyword required for search" });
         }
-        const people = findPeopleByName(
-          await fetchData<PersonSummary[]>(`${API_BASE}/people`),
-          args.person_name
-        );
+        const people = await listPeople({ nameLike: args.person_name });
         const sinceMs = args.since_days
           ? Date.now() - args.since_days * 24 * 60 * 60 * 1000
           : null;
         const matches: unknown[] = [];
         const limit = args.since_days ? 50 : 50; // search 没有 limit 参数，从 keyword 走默认
         for (const person of people.slice(0, 30)) {
-          const detail = await fetchData<PersonDetail>(`${API_BASE}/people/${person.id}`);
+          const detail = await getPerson(person.id);
+          if (!detail) continue;
           for (const message of detail.messages ?? []) {
             if (!message.content.includes(args.keyword)) continue;
             if (sinceMs && message.captured_at && new Date(message.captured_at).getTime() < sinceMs) continue;
@@ -425,18 +403,42 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
         };
 
         if (args.action === "list") {
-          const tasks = await fetchData<TaskRow[]>(
-            `${API_BASE}/tasks?status=${encodeURIComponent(args.status ?? "pending")}`
-          );
-          return asTextResult({ tasks: tasks.slice(0, args.limit ?? 20) });
+          const status = args.status ?? "pending";
+          const rows = await db.listTasks(status, args.limit ?? 20);
+          const tasks: TaskRow[] = rows.map((t) => ({
+            id: t.id,
+            title: t.title,
+            description: t.description,
+            due_at: t.due_at,
+            status: t.status as "pending" | "completed",
+            person_id: t.person_id,
+            person_name: null,
+            evidence: t.evidence,
+            created_at: t.created_at,
+            completed_at: t.completed_at,
+          }));
+          return asTextResult({ tasks });
         }
 
         if (args.action === "get") {
           if (!args.task_id) {
             return asTextResult({ error: "task_id required for get" });
           }
-          const tasks = await fetchData<TaskRow[]>(`${API_BASE}/tasks?status=all`);
-          const task = tasks.find((t) => t.id === args.task_id) ?? null;
+          const t = await db.getTask(args.task_id);
+          const task: TaskRow | null = t
+            ? {
+                id: t.id,
+                title: t.title,
+                description: t.description,
+                due_at: t.due_at,
+                status: t.status as "pending" | "completed",
+                person_id: t.person_id,
+                person_name: null,
+                evidence: t.evidence,
+                created_at: t.created_at,
+                completed_at: t.completed_at,
+              }
+            : null;
           return asTextResult({ task });
         }
 
@@ -444,15 +446,25 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
           if (!args.title?.trim()) {
             return asTextResult({ error: "title required for create" });
           }
-          const task = await fetchData<TaskRow>(`${API_BASE}/tasks`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              title: args.title,
-              description: args.description ?? "",
-              due_at: args.due_at ?? null,
-            }),
+          const created = await db.createTask({
+            id: newSnowflakeId(),
+            title: args.title,
+            description: args.description ?? "",
+            dueAt: args.due_at ?? null,
+            fingerprint: newSnowflakeId(),
           });
+          const task: TaskRow = {
+            id: created.id,
+            title: created.title,
+            description: created.description,
+            due_at: created.due_at,
+            status: "pending",
+            person_id: null,
+            person_name: null,
+            evidence: created.evidence,
+            created_at: created.created_at,
+            completed_at: null,
+          };
           return asTextResult({ task });
         }
 
@@ -460,19 +472,33 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
           if (!args.task_id) {
             return asTextResult({ error: "task_id required for update" });
           }
-          const body: Record<string, unknown> = {};
-          if (args.title !== undefined) body.title = args.title;
-          if (args.description !== undefined) body.description = args.description;
-          if (args.due_at !== undefined) body.due_at = args.due_at;
-          if (args.status_update !== undefined) body.status = args.status_update;
-          if (Object.keys(body).length === 0) {
+          if (
+            args.title === undefined &&
+            args.description === undefined &&
+            args.due_at === undefined &&
+            args.status_update === undefined
+          ) {
             return asTextResult({ error: "no fields to update" });
           }
-          const task = await fetchData<TaskRow>(`${API_BASE}/tasks/${args.task_id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+          const updated = await db.updateTask({
+            id: args.task_id,
+            title: args.title,
+            description: args.description,
+            dueAt: args.due_at,
+            status: args.status_update,
           });
+          const task: TaskRow = {
+            id: updated.id,
+            title: updated.title,
+            description: updated.description,
+            due_at: updated.due_at,
+            status: updated.status as "pending" | "completed",
+            person_id: updated.person_id,
+            person_name: null,
+            evidence: updated.evidence,
+            created_at: updated.created_at,
+            completed_at: updated.completed_at,
+          };
           return asTextResult({ task });
         }
 
@@ -480,10 +506,7 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
           if (!args.task_id) {
             return asTextResult({ error: "task_id required for delete" });
           }
-          await fetch(`${API_BASE}/tasks/${args.task_id}`, {
-            method: "DELETE",
-            credentials: "include",
-          });
+          await db.deleteTask(args.task_id);
           return asTextResult({ deleted: true, task_id: args.task_id });
         }
 
@@ -502,7 +525,7 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
       }),
       execute: async (_toolCallId, params) => {
         const args = params as { action?: "list"; limit?: number; app_name?: string };
-        const body = await fetchData<LogRow[]>(`${API_BASE}/logs?limit=${args.limit ?? 5}&offset=0`);
+        const body = await listLogs({ limit: args.limit ?? 5 });
         const appName = args.app_name?.trim().toLowerCase();
         return asTextResult({
           screenshots: body

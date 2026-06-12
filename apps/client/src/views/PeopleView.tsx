@@ -15,17 +15,19 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
-import { API_BASE } from "@/lib/types";
 import { cn, formatNumber } from "@/lib/utils";
 import { formatShortDate, initials } from "@/lib/format";
-import type { ApiResponse, MergedPersonMessage, PersonDetail, PersonSummary } from "@/lib/types";
+import { getPerson } from "@/db/people";
+import type { MergedPersonMessage, PersonDetail, PersonSummary } from "@/lib/types";
 
 export function PeopleView({
   people,
   onDeletePerson,
+  onRefresh,
 }: {
   people: PersonSummary[];
   onDeletePerson: (id: string) => Promise<boolean>;
+  onRefresh?: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(people[0]?.id ?? null);
   const [personDetail, setPersonDetail] = useState<PersonDetail | null>(null);
@@ -37,9 +39,9 @@ export function PeopleView({
   const loadPersonDetail = async (id: string) => {
     setLoading(true);
     try {
-      const resp = await fetch(`${API_BASE}/people/${id}`, { credentials: "include" });
-      const json = (await resp.json()) as ApiResponse<PersonDetail>;
-      setPersonDetail(json.data);
+      // All persistence is local SQLite now — no more HTTP fetch.
+      const detail = await getPerson(id);
+      setPersonDetail(detail);
     } catch (e) {
       console.error("[people] load detail error:", e);
     } finally {
@@ -103,6 +105,31 @@ export function PeopleView({
         eyebrow="Contacts"
         title="People"
         description="AI-recognized conversation partners. Right-click to remove."
+        actions={
+          <button
+            type="button"
+            onClick={() => onRefresh?.()}
+            title="Refresh list"
+            aria-label="Refresh"
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12a9 9 0 0 1-9 9c-2.5 0-4.7-1-6.4-2.6" />
+              <path d="M3 12a9 9 0 0 1 9-9c2.5 0 4.7 1 6.4 2.6" />
+              <path d="M21 4v5h-5" />
+              <path d="M3 20v-5h5" />
+            </svg>
+          </button>
+        }
       />
 
       <div className="flex min-h-0 flex-1">

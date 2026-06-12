@@ -2,17 +2,16 @@
 //   dev:  defaults to http://localhost:3000 (the local Hono server in apps/server)
 //   prod: defaults to https://api.thepercentai.com
 // override with VITE_API_BASE_URL in apps/client/.env (gitignored)
-const DEFAULT_API_BASE = import.meta.env.PROD
+const env = (import.meta as { env?: { PROD?: boolean; VITE_API_BASE_URL?: string; VITE_LANDING_URL?: string } }).env ?? {};
+const DEFAULT_API_BASE = env.PROD
   ? "https://api.thepercentai.com"
   : "http://localhost:3000";
-export const API_BASE: string =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEFAULT_API_BASE;
+export const API_BASE: string = env.VITE_API_BASE_URL ?? DEFAULT_API_BASE;
 export const AUTH_BASE = `${API_BASE}/api/auth`;
 
 // 官网地址 — Tauri 里用 shell.open 在系统浏览器打开
 // dev 期间可以覆盖 VITE_LANDING_URL=http://localhost:5180
-export const LANDING_URL: string =
-  (import.meta.env.VITE_LANDING_URL as string | undefined) ?? "https://thepercentai.com";
+export const LANDING_URL: string = env.VITE_LANDING_URL ?? "https://thepercentai.com";
 
 export interface ApiResponse<T> {
   code: number;

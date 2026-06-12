@@ -1,5 +1,25 @@
 const EPOCH = BigInt(Date.UTC(2026, 0, 1));
-const WORKER_ID = BigInt(Number(process.env.SNOWFLAKE_WORKER_ID ?? 1) & 0x3ff);
+
+// Worker id: in Node we read from env, in the Tauri webview there's no
+// `process` global so we fall back to a fixed value. Single-device install
+// means worker id only needs to differ across machines, and 1 is fine for
+// local SQLite (no two-writer coordination).
+function readWorkerId(): number {
+  try {
+    const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+      .process;
+    const raw = proc?.env?.SNOWFLAKE_WORKER_ID;
+    if (raw !== undefined) {
+      const n = Number(raw);
+      if (Number.isFinite(n)) return n & 0x3ff;
+    }
+  } catch {
+    // ignore — fall through to default
+  }
+  return 1;
+}
+
+const WORKER_ID = BigInt(readWorkerId());
 
 let lastTimestamp = 0n;
 let sequence = 0n;

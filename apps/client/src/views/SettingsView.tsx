@@ -16,13 +16,13 @@ import {
   EyeOff,
   Plug,
 } from "lucide-react";
+import { db } from "@/db/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { API_BASE } from "@/lib/types";
-import type { ApiResponse, AuthUser, PermissionStatus, ShortcutConfig } from "@/lib/types";
+import type { AuthUser, PermissionStatus, ShortcutConfig } from "@/lib/types";
 import { PROVIDER_PRESETS, type ProviderId } from "@percent/runtime";
 import {
   clearByokKey,
@@ -304,21 +304,16 @@ function ClearCacheSection({ onCacheCleared }: { onCacheCleared: () => void }) {
     setClearing(true);
     setMessage(null);
     try {
-      const [removed, logsResp] = await Promise.all([
+      // All persistence is now local SQLite (Diesel in the Rust process).
+      // Clear cache = clear_local_cache Tauri command (deletes screenshots)
+      // + wipe the local log / people / task tables through the same
+      // `db_*` invoke surface.
+      const [removed, deletedLogs, deletedPeople, deletedTasks] = await Promise.all([
         invoke<number>("clear_local_cache"),
-        fetch(`${API_BASE}/logs`, { method: "DELETE", credentials: "include" }),
+        db.purgeAllLogs(),
+        db.purgeAllPeople(),
+        db.purgeAllTasks(),
       ]);
-      const logsJson = (await logsResp.json()) as ApiResponse<{
-        deleted_logs?: number;
-        deleted_people?: number;
-        deleted_tasks?: number;
-      }>;
-      if (!logsResp.ok || logsJson.code !== 0) {
-        throw new Error(logsJson.message || "Failed to clear local data");
-      }
-      const deletedLogs = logsJson.data?.deleted_logs ?? 0;
-      const deletedPeople = logsJson.data?.deleted_people ?? 0;
-      const deletedTasks = logsJson.data?.deleted_tasks ?? 0;
       setMessage({
         kind: "ok",
         text:

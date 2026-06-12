@@ -19,14 +19,22 @@ import {
 import { cn } from "@/lib/utils";
 import { maybeAddTaskToCalendar } from "@/lib/calendar";
 import { isExistingTaskCandidate, fetchPendingTasks } from "@/lib/taskDedup";
+import { listPeople } from "@/db/people";
+import { db } from "@/db/client";
+import { newSnowflakeId } from "@/lib/snowflake";
 import { logInfo, logWarn, logError, newTraceId as logNewTraceId } from "@/lib/logger";
-import { API_BASE } from "@/lib/types";
-import type { ApiResponse } from "@/lib/types";
+import { callAnalyze, callSuggest } from "@/lib/llm";
 
 function serializeError(e: unknown) {
   if (e instanceof Error) return { name: e.name, message: e.message, stack: e.stack };
   return { value: String(e) };
 }
+
+// ---- BYOK helper ----
+// (Removed: the client never holds the LLM provider key — the server's
+// /chat endpoint reads it from env. The previous design where the client
+// supplied the api_key put a secret in every request body where it could
+// leak through logs.)
 
 // ---- Types ----
 
@@ -59,13 +67,10 @@ interface AnalyzePipelineResult {
   logId: string;
   result: {
     is_chat: boolean;
-    person?: { id: number | string; name: string };
-    turn?: { id: number | string; topic: string };
+    person?: { name: string; is_new?: boolean } | null;
+    turn?: { topic: string } | null;
     messages?: { role: string; content: string; sender_name?: string | null }[];
-    trace_id?: string;
-    skipped_duplicate?: boolean;
     task_candidate?: TaskCandidate | null;
-    person_newly_created?: boolean;
   };
 }
 
@@ -147,29 +152,16 @@ async function runAnalyzePipeline(
   try {
     const startedAt = performance.now();
     logInfo("logs.create.start", { trace_id: traceId });
-    const logResp = await fetch(`${API_BASE}/logs`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        occurred_at: event.occurred_at,
-        app_name: event.app_name,
-        app_bundle_id: event.app_bundle_id,
-        is_send: event.is_send,
-        is_wechat: event.is_wechat,
-        screenshot_path: event.screenshot_path ?? undefined,
-      }),
+    const { createLog } = await import("@/db/logs");
+    const log = await createLog({
+      occurredAt: event.occurred_at,
+      appName: event.app_name,
+      appBundleId: event.app_bundle_id,
+      isSend: event.is_send,
+      isWechat: event.is_wechat,
+      screenshotPath: event.screenshot_path ?? null,
     });
-    if (!logResp.ok) {
-      logError("logs.create.failed", {
-        trace_id: traceId,
-        status: logResp.status,
-        body: await logResp.text(),
-      });
-      return null;
-    }
-    const logData = (await logResp.json()) as ApiResponse<{ id: string }>;
-    logId = logData.data.id;
+    logId = log.id;
     logInfo("logs.create.success", {
       trace_id: traceId,
       log_id: logId,
@@ -217,13 +209,6 @@ async function runAnalyzePipeline(
 
   try {
     const startedAt = performance.now();
-    const body: Record<string, unknown> = {
-      log_id: logId,
-      occurred_at: event.occurred_at,
-      app_name: options.fallbackAppName ?? event.app_name,
-      detect_task: options.detectTask ?? true,
-      image_base64: imageBase64,
-    };
     logInfo("analyze.request.start", {
       trace_id: traceId,
       log_id: logId,
@@ -235,40 +220,82 @@ async function runAnalyzePipeline(
         detect_task: options.detectTask ?? true,
       },
     });
-    const analyzeResp = await fetch(`${API_BASE}/analyze`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    // Pull real context from local SQLite so the LLM can dedup + flag
+    // is_new people. The previous hard-coded `[]` made the model always
+    // say "Unknown" for the contact and never trigger dedup.
+    const [recentPeople, recentTasks, recentPerson] = await Promise.all([
+      listPeople({ limit: 5 }),
+      fetchPendingTasks(),
+      // If the frontmost app bundle suggests it's a known contact, hydrate
+      // recent messages for that person. Inline-import to keep the
+      // module-load graph lean until the analyze path actually fires.
+      event.app_bundle_id?.includes("WeChat")
+        ? import("@/db/people").then((m) =>
+            m.getPersonByName(event.app_name).catch(() => null),
+          )
+        : Promise.resolve(null),
+    ]);
+    const recentMessages =
+      recentPerson?.messages?.map((m) => ({
+        role: (m.role === "self" ? "self" : "other") as "self" | "other",
+        content: m.content,
+      })) ?? [];
+
+    const analyzeResp = await callAnalyze({
+      log: {
+        id: logId,
+        occurred_at: event.occurred_at,
+        app_name: options.fallbackAppName ?? event.app_name,
+        app_bundle_id: event.app_bundle_id,
+        is_send: event.is_send,
+        is_wechat: event.is_wechat,
+        screenshot_path: event.screenshot_path ?? null,
+      },
+      image_base64: imageBase64,
+      recent_people: recentPeople.map((p) => ({ id: p.id, name: p.name })),
+      recent_tasks: recentTasks.map((t) => ({ id: t.id, title: t.title })),
+      recent_messages: recentMessages,
     });
-    if (!analyzeResp.ok) {
-      logError("analyze.request.failed", {
+    if (!analyzeResp.text) {
+      logError("analyze.request.empty", {
         trace_id: traceId,
         log_id: logId,
-        status: analyzeResp.status,
-        body: await analyzeResp.text(),
       });
       return null;
     }
-    const analyzeData = (await analyzeResp.json()) as ApiResponse<{
+    // The server /chat endpoint returns the raw LLM text — the client is
+    // responsible for parsing the JSON shape defined in the analyze system
+    // prompt.
+    let result: {
       is_chat: boolean;
-      person?: { id: string; name: string };
-      turn?: { id: string; topic: string };
+      person?: { name: string; is_new?: boolean } | null;
+      turn?: { topic: string } | null;
       messages?: { role: string; content: string; sender_name?: string | null }[];
-      trace_id?: string;
-      skipped_duplicate?: boolean;
       task_candidate?: TaskCandidate | null;
-      person_newly_created?: boolean;
-    }>;
-    const result = analyzeData.data;
+    };
+    try {
+      const m = analyzeResp.text.match(/\{[\s\S]*\}/);
+      result = JSON.parse(m ? m[0] : analyzeResp.text);
+    } catch (e) {
+      logError("analyze.parse_failed", {
+        trace_id: traceId,
+        log_id: logId,
+        raw: analyzeResp.text.slice(0, 200),
+        error: serializeError(e),
+      });
+      return null;
+    }
+    // The server is now prompt-agnostic — these server-side fields are gone.
+    // The client derives what it needs from `is_new` on the person.
+    const personIsNew = Boolean(result.person?.is_new);
     logInfo("analyze.request.success", {
       trace_id: traceId,
       log_id: logId,
-      server_trace_id: result.trace_id,
+      server_trace_id: null,
       is_chat: result.is_chat,
       partner: result.person?.name ?? null,
-      partner_id: result.person?.id ?? null,
-      turn_id: result.turn?.id ?? null,
+      partner_id: null,
+      turn_id: null,
       topic: result.turn?.topic ?? null,
       message_count: result.messages?.length ?? 0,
       messages: (result.messages ?? []).map((m) => ({
@@ -285,13 +312,70 @@ async function runAnalyzePipeline(
             evidence: result.task_candidate.evidence,
           }
         : null,
-      skipped_duplicate: Boolean(result.skipped_duplicate),
-      person_newly_created: result.person_newly_created ?? false,
+      skipped_duplicate: false,
+      person_newly_created: personIsNew,
       duration_ms: Math.round(performance.now() - startedAt),
     });
 
-    if (result.person_newly_created && result.person) {
-      options.onPersonCreated?.(String(result.person.id), result.person.name);
+    // Always persist a chat turn + the analyzed messages so the
+    // People → contact-detail view has history to load. We pin the
+    // turn to *some* person record.
+    //
+    // Dedup rule: the LLM's `is_new` flag is **ignored** — it's a
+    // vision model guess and the model regularly mis-flags brand-new
+    // group chats as known. We always dedup by name on the client
+    // side: existing → reuse, missing → create. That keeps the
+    // contact list accurate without losing turns to a flaky LLM.
+    const { createPerson, getPersonByName } = await import("@/db/people");
+    let personId: string | null = null;
+    if (result.person?.name) {
+      const existing = await getPersonByName(result.person.name);
+      if (existing) {
+        personId = existing.id;
+      } else {
+        const created = await createPerson({ name: result.person.name });
+        options.onPersonCreated?.(created.id, created.name);
+        personId = created.id;
+      }
+    } else if (recentPerson?.id) {
+      personId = recentPerson.id;
+    } else {
+      // Fallback: key the chat history to a "wechat-buddy" person
+      // (created on demand) so the contact list isn't empty just
+      // because the vision model didn't return a name. Dedup-by-name
+      // so repeated falls-on-the-same-contact don't create N rows.
+      const fallbackName = event.app_name?.trim() || "Unknown";
+      const fb = await getPersonByName(fallbackName);
+      personId = fb?.id ?? (await createPerson({ name: fallbackName })).id;
+    }
+
+    if (personId) {
+      const turnId = newSnowflakeId();
+      await db.createChatTurn({
+        id: turnId,
+        logId,
+        personId,
+        topic: result.turn?.topic ?? "",
+        capturedAt: event.occurred_at,
+      });
+      if (result.messages?.length) {
+        await db.batchInsertChatMessages(
+          result.messages.map((m, idx) => ({
+            id: newSnowflakeId(),
+            turnId,
+            role: m.role,
+            content: m.content,
+            senderName: m.sender_name ?? null,
+            seq: idx,
+          })),
+        );
+      }
+      logInfo("analyze.persisted", {
+        trace_id: traceId,
+        log_id: logId,
+        person_id: personId,
+        message_count: result.messages?.length ?? 0,
+      });
     }
 
     if (result.task_candidate) {
@@ -320,7 +404,7 @@ async function runAnalyzePipeline(
           target_id: candidate.update_target_id,
           old_task_found: Boolean(oldTask),
         });
-        onTaskCandidate({ ...candidate, oldTask, person_newly_created: result.person_newly_created }, false);
+        onTaskCandidate({ ...candidate, oldTask, person_newly_created: personIsNew }, false);
       } else {
         const match = isExistingTaskCandidate(
           {
@@ -347,7 +431,7 @@ async function runAnalyzePipeline(
             log_id: logId,
             candidate_title: candidate.title,
           });
-          onTaskCandidate({ ...candidate, person_newly_created: result.person_newly_created }, false);
+          onTaskCandidate({ ...candidate, person_newly_created: personIsNew }, false);
         }
       }
     }
@@ -365,7 +449,7 @@ async function runAnalyzePipeline(
     logInfo("pipeline.success", {
       trace_id: traceId,
       log_id: logId,
-      server_trace_id: result.trace_id,
+      server_trace_id: null,
       duration_ms: Math.round(performance.now() - pipelineStartedAt),
     });
     return { logId, result };
@@ -515,28 +599,27 @@ export default function Bubble() {
       due_at: candidate.due_at,
     });
     try {
-      const resp = await fetch(`${API_BASE}/tasks/confirm`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: candidate.action,
-          update_target_id: candidate.update_target_id ?? null,
-          person_id: candidate.person_id,
-          person_name: candidate.person_name,
-          log_id: candidate.log_id,
-          source_turn_id: candidate.source_turn_id,
+      const { db } = await import("@/db/client");
+      const { newSnowflakeId } = await import("@/lib/snowflake");
+      if (candidate.action === "update" && candidate.update_target_id) {
+        await db.updateTask({
+          id: candidate.update_target_id,
           title: candidate.title,
-          description: candidate.description,
-          due_at: candidate.due_at,
-          evidence: candidate.evidence,
-          fingerprint: candidate.fingerprint,
-          raw_ai_response: candidate.raw_ai_response,
-        }),
-      });
-      if (!resp.ok) {
-        console.error("[bubble] POST /tasks/confirm failed:", resp.status, await resp.text());
-        return;
+          description: candidate.description ?? undefined,
+          dueAt: candidate.due_at ?? undefined,
+        });
+      } else {
+        await db.createTask({
+          id: newSnowflakeId(),
+          title: candidate.title,
+          description: candidate.description ?? "",
+          dueAt: candidate.due_at ?? null,
+          personId: candidate.person_id ?? null,
+          logId: candidate.log_id ?? null,
+          sourceTurnId: candidate.source_turn_id ?? null,
+          evidence: candidate.evidence ?? "",
+          fingerprint: candidate.fingerprint ?? newSnowflakeId(),
+        });
       }
       // update 模式不重写 calendar
       if (candidate.action !== "update") {
@@ -574,7 +657,7 @@ export default function Bubble() {
       // 关掉当前展示的 task popover（active 就是这个 task）
       if (active?.kind === "task") dismiss(active.id);
     } catch (e) {
-      console.error("[bubble] POST /tasks/confirm error:", e);
+      console.error("[bubble] task.confirm error:", e);
     } finally {
       setConfirming(false);
     }
@@ -762,6 +845,21 @@ export default function Bubble() {
     const progressId = enqueue({ kind: "progress", action: "reply" });
     const traceId = logNewTraceId();
     logInfo("reply.start", { trace_id: traceId });
+    // Yield to the browser so the progress UI can paint before we kick off
+    // the long-running screencapture + LLM call. Otherwise the user sees a
+    // brief freeze (spinning beachball on macOS) between the menu click
+    // and any visible feedback.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    // Fire-and-forget: persist the chat turn + messages for this
+    // exchange. Done in parallel with the suggest call so it doesn't
+    // add latency to the reply panel. The dedup / task_candidate
+    // signals from this analyze call are intentionally ignored — reply
+    // is read-only — but the contact + chat history it writes lets
+    // the People page surface newly-identified contacts.
+    void captureAndAnalyze({ detectTask: false }).catch((e) => {
+      logWarn("reply.persist_failed", { trace_id: traceId, error: String(e) });
+    });
 
     try {
       // 1. 抓屏（同 capture 流程）
@@ -776,28 +874,19 @@ export default function Bubble() {
         return;
       }
 
-      // 2. 建 log
+      // 2. 建 log (本地 sqlite)
       let logId: string;
       try {
-        const logResp = await fetch(`${API_BASE}/logs`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            occurred_at: captured.occurred_at,
-            app_name: captured.app_name,
-            app_bundle_id: captured.app_bundle_id,
-            is_send: captured.is_send,
-            is_wechat: captured.is_wechat,
-            screenshot_path: captured.screenshot_path ?? undefined,
-          }),
+        const { createLog } = await import("@/db/logs");
+        const log = await createLog({
+          occurredAt: captured.occurred_at,
+          appName: captured.app_name,
+          appBundleId: captured.app_bundle_id,
+          isSend: captured.is_send,
+          isWechat: captured.is_wechat,
+          screenshotPath: captured.screenshot_path ?? null,
         });
-        if (!logResp.ok) {
-          logError("reply.logs.failed", { trace_id: traceId, status: logResp.status });
-          throw new Error("logs failed");
-        }
-        const logData = (await logResp.json()) as ApiResponse<{ id: string }>;
-        logId = logData.data.id;
+        logId = log.id;
       } catch (e) {
         logError("reply.logs.error", { trace_id: traceId, error: serializeError(e) });
         showSuggestionPanel({
@@ -832,27 +921,22 @@ export default function Bubble() {
         return;
       }
 
-      // 4. 一次 LLM 调用：extract + replies
-      logInfo("reply.analyze_reply.request.start", { trace_id: traceId, log_id: logId, image_base64_chars: imageBase64.length });
+      // 4. 一次 LLM 调用：extract + replies (走 server /chat with suggest prompt)
+      logInfo("reply.suggest.request.start", { trace_id: traceId, log_id: logId, image_base64_chars: imageBase64.length });
       const startedAt = performance.now();
-      const replyResp = await fetch(`${API_BASE}/analyze/reply`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          log_id: logId,
-          occurred_at: captured.occurred_at,
-          app_name: captured.app_name || "WeChat",
-          image_base64: imageBase64,
-        }),
-      });
-      if (!replyResp.ok) {
-        logError("reply.analyze_reply.request.failed", {
+      const suggestData = await callSuggest({
+        person_name: undefined,
+        recent_messages: [],
+        image_base64: imageBase64,
+      }).catch((e) => {
+        logError("reply.suggest.request.failed", {
           trace_id: traceId,
           log_id: logId,
-          status: replyResp.status,
-          body: await replyResp.text(),
+          error: String(e),
         });
+        return null;
+      });
+      if (!suggestData?.text) {
         showSuggestionPanel({
           title: "Couldn't generate",
           description: "The AI didn't return a usable suggestion.",
@@ -860,44 +944,48 @@ export default function Bubble() {
         });
         return;
       }
-      const replyData = (await replyResp.json()) as ApiResponse<{
-        is_chat: boolean;
-        person?: { id: string; name: string } | null;
-        person_newly_created?: boolean;
-        person_name?: string;
-        styles?: SuggestStyle[];
+      // The server /chat endpoint returns the raw LLM text — parse the
+      // `{ replies: { steady, casual, short } }` JSON shape defined in
+      // the SUGGEST_TRIO_SYSTEM_PROMPT.
+      let result: {
+        replies?: { steady?: string; casual?: string; short?: string; recommend?: string };
         labels?: Record<SuggestStyle, { cn: string; en: string }>;
-        replies?: Record<SuggestStyle, string>;
-      }>;
-      const result = replyData.data;
-      logInfo("reply.analyze_reply.request.success", {
+      };
+      try {
+        const m = suggestData.text.match(/\{[\s\S]*\}/);
+        result = JSON.parse(m ? m[0] : suggestData.text);
+      } catch {
+        logWarn("reply.suggest.parse_failed", { trace_id: traceId, raw: suggestData.text.slice(0, 200) });
+        showSuggestionPanel({
+          title: "Couldn't generate",
+          description: "The AI didn't return a usable suggestion.",
+          error: true,
+        });
+        return;
+      }
+      logInfo("reply.suggest.request.success", {
         trace_id: traceId,
         log_id: logId,
-        is_chat: result.is_chat,
-        partner: result.person?.name ?? null,
         has_replies: Boolean(result.replies),
         duration_ms: Math.round(performance.now() - startedAt),
       });
 
-      if (!result.is_chat || !result.replies) {
+      if (!result.replies) {
         showSuggestionPanel({
-          title: result.is_chat ? "Couldn't generate" : "No chat detected",
-          description: result.is_chat
-            ? "The AI didn't return a usable suggestion."
-            : `The active app is ${captured.app_name} — no replyable chat was found.`,
+          title: "Couldn't generate",
+          description: "The AI didn't return a usable suggestion.",
           error: true,
         });
         return;
       }
 
-      // 5. 新联系人 toast
-      if (result.person_newly_created && result.person) {
-        enqueue({ kind: "toast_person_added", personId: String(result.person.id), name: result.person.name, durationMs: 3000 });
-      }
-
-      const replies = result.replies;
+      const replies: Record<SuggestStyle, string> = {
+        recommend: result.replies.recommend ?? result.replies.steady ?? "",
+        steady: result.replies.steady ?? result.replies.recommend ?? "",
+        casual: result.replies.casual ?? "",
+      };
       const labels = result.labels ?? (STYLE_LABEL_CN as never);
-      const personNameResolved = result.person_name ?? result.person?.name ?? "对方";
+      const personNameResolved = "对方";
       const defaultStyle: SuggestStyle = "recommend";
       const firstReply = replies[defaultStyle]?.trim() ?? "";
 
@@ -952,6 +1040,9 @@ export default function Bubble() {
     const progressId = enqueue({ kind: "progress", action: "task" });
     const traceId = logNewTraceId();
     logInfo("capture_task.start", { trace_id: traceId });
+    // See generateReplySuggestion — give React a frame to paint the
+    // progress UI before we hit the screencapture path.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     try {
       const result = await captureAndAnalyze({ detectTask: true });
       if (!result) {
@@ -968,10 +1059,10 @@ export default function Bubble() {
         logInfo("capture_task.no_candidate", {
           trace_id: traceId,
           message_count: messageCount,
-          skipped_duplicate: Boolean(result.analyzed.result.skipped_duplicate),
+          skipped_duplicate: false,
         });
         showSuggestionPanel({
-          title: result.analyzed.result.skipped_duplicate ? "Already captured" : "No to-do detected",
+          title: "No to-do detected",
           description:
             messageCount === 0
               ? "No new chat messages were detected in this screenshot."
@@ -1096,10 +1187,15 @@ export default function Bubble() {
         );
         break;
       case "reply":
-        void generateReplySuggestion();
+        // Defer to the next frame so the action menu can collapse and the
+        // progress UI (set in `generateReplySuggestion`) can paint before
+        // the long-running `captureCurrentScreen` + LLM call kicks off.
+        // Otherwise the user sees the macOS "spinning beachball" between
+        // clicking the menu item and any visible feedback.
+        requestAnimationFrame(() => void generateReplySuggestion());
         break;
       case "task":
-        void captureTaskCandidate();
+        requestAnimationFrame(() => void captureTaskCandidate());
         break;
       case "main":
         void openMainWindow();

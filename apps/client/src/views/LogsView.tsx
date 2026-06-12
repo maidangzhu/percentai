@@ -4,10 +4,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { API_BASE } from "@/lib/types";
+import { getPerson } from "@/db/people";
 import { cn, formatNumber } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
-import type { ApiResponse, LogRow, Message, PersonDetail, TurnDetail } from "@/lib/types";
+import type { LogRow, Message, TurnDetail } from "@/lib/types";
 
 type DetailEntry = TurnDetail & { partner_name: string };
 
@@ -42,9 +42,9 @@ export function LogsView({
     if (!log.person_id || !log.turn_id) return;
     if (detailCache[log.id]) return;
     try {
-      const resp = await fetch(`${API_BASE}/people/${log.person_id}`, { credentials: "include" });
-      const json = (await resp.json()) as ApiResponse<PersonDetail>;
-      const person = json.data;
+      // All persistence is local SQLite now — no more server fetch.
+      const person = await getPerson(log.person_id);
+      if (!person) return;
       const turn = person.turns.find((t) => t.id === log.turn_id);
       if (turn) {
         setDetailCache((prev) => ({

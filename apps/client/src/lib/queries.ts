@@ -1,12 +1,16 @@
-// All local CRUD queries — read/write the user's local SQLite via Prisma.
-// LLM-driven ops (analyze/suggest/agent) still go through the cloud server;
-// the cloud-only `credits` endpoint also stays on fetch.
+// All local CRUD queries — read/write the user's local SQLite via Tauri
+// commands (Diesel-backed in Rust).
 //
 // The hooks signature is unchanged so views don't need to be touched.
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { prisma } from "@/db/client";
-import { API_BASE, type ApiResponse } from "@/lib/types";
+import { db } from "@/db/client";
+import {
+  API_BASE,
+  type ApiResponse,
+  type LogRow as DomainLogRow,
+  type TaskRow,
+} from "@/lib/types";
 import { newSnowflakeId } from "@/lib/snowflake";
 
 /* ── Query keys ─────────────────────────────────────────────── */
@@ -34,28 +38,24 @@ async function fetchJson<T>(url: string): Promise<T> {
 export function useLogs() {
   return useQuery({
     queryKey: queryKeys.logs,
-    queryFn: async () => {
-      const rows = await prisma.log.findMany({
-        take: 100,
-        orderBy: { occurredAt: "desc" },
-        include: { chatTurns: { take: 1, orderBy: { id: "desc" } } },
-      });
-      return rows.map((r) => {
-        const lastTurn = r.chatTurns[0];
-        return {
-          id: r.id,
-          occurred_at: r.occurredAt.toISOString(),
-          app_name: r.appName,
-          app_bundle_id: r.appBundleId,
-          is_send: r.isSend,
-          is_wechat: r.isWechat,
-          screenshot_path: r.screenshotPath,
-          turn_id: lastTurn?.id ?? null,
-          topic: lastTurn?.topic ?? null,
-          partner_name: null,
-          person_id: null,
-        };
-      });
+    queryFn: async (): Promise<DomainLogRow[]> => {
+      // Rust-side already joins each log with its most recent chat_turn
+      // (turn_id, topic, person_id, partner_name). Map the raw row into
+      // the domain LogRow shape (booleans + snake_case field names).
+      const rows = await db.listLogsWithLastTurn(100);
+      return rows.map((r) => ({
+        id: r.id,
+        occurred_at: r.occurred_at,
+        app_name: r.app_name,
+        app_bundle_id: r.app_bundle_id,
+        is_send: r.is_send === 1,
+        is_wechat: r.is_wechat === 1,
+        screenshot_path: r.screenshot_path,
+        turn_id: r.turn_id,
+        topic: r.topic,
+        partner_name: r.partner_name,
+        person_id: r.person_id,
+      }));
     },
     staleTime: 10_000,
     refetchOnWindowFocus: true,
@@ -66,46 +66,44 @@ export function usePeople() {
   return useQuery({
     queryKey: queryKeys.people,
     queryFn: async () => {
-      const rows = await prisma.person.findMany({
-        orderBy: { updatedAt: "desc" },
-        include: {
-          _count: { select: { chatTurns: true } },
-        },
-      });
-      return rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        client_app: r.clientApp,
-        created_at: r.createdAt.toISOString(),
-        updated_at: r.updatedAt.toISOString(),
-        turn_count: r._count.chatTurns,
-        last_chat_at: null,
-      }));
+      return await db.listPeople(undefined, 50);
     },
     staleTime: 10_000,
     refetchOnWindowFocus: true,
   });
 }
 
+function toDomainTask(r: {
+  id: string;
+  person_id: string | null;
+  title: string;
+  description: string;
+  due_at: string | null;
+  status: string;
+  evidence: string;
+  created_at: string;
+  completed_at: string | null;
+}): TaskRow {
+  return {
+    id: r.id,
+    person_id: r.person_id,
+    person_name: null, // resolved by view
+    title: r.title,
+    description: r.description,
+    due_at: r.due_at,
+    status: r.status as "pending" | "completed",
+    evidence: r.evidence,
+    created_at: r.created_at,
+    completed_at: r.completed_at,
+  };
+}
+
 export function useTasks() {
   return useQuery({
     queryKey: queryKeys.tasks,
     queryFn: async () => {
-      const rows = await prisma.task.findMany({
-        orderBy: [{ status: "asc" }, { dueAt: "asc" }],
-      });
-      return rows.map((r) => ({
-        id: r.id,
-        title: r.title,
-        description: r.description,
-        due_at: r.dueAt?.toISOString() ?? null,
-        status: r.status as "pending" | "completed",
-        person_id: r.personId,
-        person_name: null, // resolved by view
-        evidence: r.evidence,
-        created_at: r.createdAt.toISOString(),
-        completed_at: r.completedAt?.toISOString() ?? null,
-      }));
+      const rows = await db.listTasks(undefined, 100);
+      return rows.map(toDomainTask);
     },
     staleTime: 10_000,
     refetchOnWindowFocus: true,
@@ -124,27 +122,28 @@ export function useCredits(userId: string | undefined) {
   });
 }
 
-// Stats: now local — count rows from each table.
+// Stats: one round-trip to Rust for all counts.
 export function useStats() {
   return useQuery({
     queryKey: queryKeys.stats,
     queryFn: async () => {
-      const [tasks, people, turns, messages, logs] = await Promise.all([
-        prisma.task.groupBy({ by: ["status"], _count: { _all: true } }),
-        prisma.person.count(),
-        prisma.chatTurn.count(),
-        prisma.chatMessage.count(),
-        prisma.log.count(),
-      ]);
-      const pending = tasks.find((t) => t.status === "pending")?._count._all ?? 0;
-      const completed = tasks.find((t) => t.status === "completed")?._count._all ?? 0;
+      const s = await db.getStats();
       return {
-        tasks: { total: pending + completed, pending, completed },
-        people,
-        chat_turns: turns,
-        chat_messages: messages,
-        logs,
-        ai: { interactions: 0, reply_suggestions: 0, task_detections: 0, agent_messages: 0 },
+        tasks: {
+          total: s.tasks_total,
+          pending: s.tasks_pending,
+          completed: s.tasks_completed,
+        },
+        people: s.people,
+        chat_turns: s.chat_turns,
+        chat_messages: s.chat_messages,
+        logs: s.logs,
+        ai: {
+          interactions: 0,
+          reply_suggestions: 0,
+          task_detections: 0,
+          agent_messages: 0,
+        },
         credits_used: 0,
         last_active_at: null,
       };
@@ -176,44 +175,20 @@ export function useCreateTask() {
       fingerprint?: string;
     }) => {
       const fp = input.fingerprint ?? newSnowflakeId();
-      const existing = await prisma.task.findUnique({ where: { fingerprint: fp } });
+      const existing = await db.getTaskByFingerprint(fp);
       if (existing) {
-        return {
-          id: existing.id,
-          person_id: existing.personId,
-          person_name: input.person_name ?? null,
-          title: existing.title,
-          description: existing.description,
-          due_at: existing.dueAt?.toISOString() ?? null,
-          status: existing.status as "pending" | "completed",
-          evidence: existing.evidence,
-          created_at: existing.createdAt.toISOString(),
-          completed_at: existing.completedAt?.toISOString() ?? null,
-        };
+        return toDomainTask(existing);
       }
-      const created = await prisma.task.create({
-        data: {
-          id: newSnowflakeId(),
-          title: input.title,
-          description: input.description ?? "",
-          dueAt: input.due_at ? new Date(input.due_at) : null,
-          personId: input.person_id ?? null,
-          evidence: input.evidence ?? "",
-          fingerprint: fp,
-        },
+      const created = await db.createTask({
+        id: newSnowflakeId(),
+        title: input.title,
+        description: input.description,
+        dueAt: input.due_at,
+        personId: input.person_id,
+        evidence: input.evidence,
+        fingerprint: fp,
       });
-      return {
-        id: created.id,
-        person_id: created.personId,
-        person_name: input.person_name ?? null,
-        title: created.title,
-        description: created.description,
-        due_at: created.dueAt?.toISOString() ?? null,
-        status: created.status as "pending" | "completed",
-        evidence: created.evidence,
-        created_at: created.createdAt.toISOString(),
-        completed_at: created.completedAt?.toISOString() ?? null,
-      };
+      return toDomainTask(created);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
@@ -235,19 +210,14 @@ export function useUpdateTask() {
       due_at?: string | null;
       status?: "pending" | "completed";
     }) => {
-      const updated = await prisma.task.update({
-        where: { id },
-        data: {
-          ...(body.title !== undefined && { title: body.title }),
-          ...(body.description !== undefined && { description: body.description }),
-          ...(body.due_at !== undefined && { dueAt: body.due_at ? new Date(body.due_at) : null }),
-          ...(body.status !== undefined && {
-            status: body.status,
-            completedAt: body.status === "completed" ? new Date() : null,
-          }),
-        },
+      const updated = await db.updateTask({
+        id,
+        title: body.title,
+        description: body.description,
+        dueAt: body.due_at,
+        status: body.status,
       });
-      return updated;
+      return toDomainTask(updated);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
@@ -260,7 +230,7 @@ export function useDeleteTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await prisma.task.delete({ where: { id } });
+      await db.deleteTask(id);
       return { ok: true };
     },
     onSuccess: () => {
@@ -274,7 +244,7 @@ export function useDeletePerson() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await prisma.person.delete({ where: { id } });
+      await db.deletePerson(id);
       return { ok: true };
     },
     onSuccess: () => {

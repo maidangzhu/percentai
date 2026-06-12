@@ -18,9 +18,15 @@ import {
   type ToolsOptions,
 } from "@/bubble/agentRuntime";
 import type { AgentMessage, AgentSessionSummary } from "@/bubble/ChatPanel";
-import type { ApiResponse } from "@/lib/types";
-import { API_BASE } from "@/lib/types";
-import { logInfo, logWarn, logError, newTraceId as logNewTraceId } from "@/lib/logger";
+import { logInfo, logError, newTraceId as logNewTraceId } from "@/lib/logger";
+import {
+  listAgentSessions,
+  getAgentSession,
+  createAgentSession,
+  deleteAgentSession,
+  batchAppendAgentMessages,
+  appendAgentMessage,
+} from "@/db/agentSessions";
 
 const AGENT_SESSION_STORAGE_KEY = "percent.agentSessionId";
 
@@ -145,10 +151,7 @@ export function useChatWindow(): UseChatWindowResult {
 
   const fetchSessionList = async (): Promise<AgentSessionSummary[]> => {
     try {
-      const resp = await fetch(`${API_BASE}/agent/sessions`, { credentials: "include" });
-      if (!resp.ok) return [];
-      const body = (await resp.json()) as ApiResponse<AgentSessionSummary[]>;
-      return body.data ?? [];
+      return await listAgentSessions();
     } catch (e) {
       console.error("[chat] list sessions error:", e);
       return [];
@@ -167,21 +170,12 @@ export function useChatWindow(): UseChatWindowResult {
 
   const loadSession = useCallback(async (id: string): Promise<boolean> => {
     try {
-      const resp = await fetch(`${API_BASE}/agent/sessions/${id}`, { credentials: "include" });
-      if (resp.status === 404) {
+      const session = await getAgentSession(id);
+      if (!session) {
         return false;
       }
-      if (!resp.ok) {
-        logError("agent.session.load.failed", { status: resp.status });
-        return false;
-      }
-      const body = (await resp.json()) as ApiResponse<{
-        id: string;
-        title: string;
-        messages: AgentMessage[];
-      }>;
-      setAgentMessages(body.data.messages ?? []);
-      setCurrentSessionTitle(body.data.title ?? "");
+      setAgentMessages(session.messages as AgentMessage[]);
+      setCurrentSessionTitle(session.title);
       return true;
     } catch (e) {
       logError("agent.session.load.error", { error: serializeError(e) });
@@ -194,42 +188,19 @@ export function useChatWindow(): UseChatWindowResult {
     logInfo("agent.session.create.start", { trace_id: traceId });
     setAgentLoading(true);
     try {
-      const resp = await fetch(`${API_BASE}/agent/sessions`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+      const session = await createAgentSession({
+        userId: "local",
       });
-      if (!resp.ok) {
-        logError("agent.session.create.failed", {
-          trace_id: traceId,
-          status: resp.status,
-        });
-        setAgentMessages([
-          {
-            id: `${Date.now()}-assistant-error`,
-            role: "assistant",
-            kind: "error",
-            content: "Couldn't create a new session. Check network or sign-in.",
-          },
-        ]);
-        return null;
-      }
-      const body = (await resp.json()) as ApiResponse<{
-        id: string;
-        title: string;
-        messages: AgentMessage[];
-      }>;
       logInfo("agent.session.create.success", {
         trace_id: traceId,
-        session_id: body.data.id,
+        session_id: session.id,
       });
       setAgentMessages([]);
-      setCurrentSessionId(body.data.id);
-      setCurrentSessionTitle(body.data.title ?? "");
-      persistSessionId(body.data.id);
+      setCurrentSessionId(session.id);
+      setCurrentSessionTitle(session.title);
+      persistSessionId(session.id);
       void loadSessionList();
-      return body.data.id;
+      return session.id;
     } catch (e) {
       logError("agent.session.create.error", { trace_id: traceId, error: serializeError(e) });
       return null;
@@ -257,14 +228,7 @@ export function useChatWindow(): UseChatWindowResult {
   const deleteSessionAndRefresh = useCallback(
     async (id: string) => {
       try {
-        const resp = await fetch(`${API_BASE}/agent/sessions/${id}`, {
-          method: "DELETE",
-          credentials: "include",
-        });
-        if (!resp.ok) {
-          logError("agent.session.delete.failed", { id, status: resp.status });
-          return;
-        }
+        await deleteAgentSession(id);
         if (id === currentSessionId) {
           setCurrentSessionId(null);
           setCurrentSessionTitle("");
@@ -364,17 +328,14 @@ export function useChatWindow(): UseChatWindowResult {
         // 拿历史
         const historyMessages = await (async () => {
           try {
-            const resp = await fetch(`${API_BASE}/agent/sessions/${currentSessionId ?? "new"}`, {
-              credentials: "include",
-            });
-            if (!resp.ok) return [];
-            const body = (await resp.json()) as ApiResponse<{ messages: AgentMessage[] }>;
-            return body.data.messages ?? [];
+            if (!currentSessionId) return [];
+            const session = await getAgentSession(currentSessionId);
+            return session?.messages ?? [];
           } catch {
             return [];
           }
         })();
-        const historyForAgent = uiMessagesToRuntimeMessages(historyMessages);
+        const historyForAgent = uiMessagesToRuntimeMessages(historyMessages as AgentMessage[]);
 
         const toolsOptions: ToolsOptions = {
           approvalRequest: requestApproval,
@@ -560,26 +521,30 @@ export function useChatWindow(): UseChatWindowResult {
         const finalMessages = Array.from(stagedMessages.values());
         void (async () => {
           try {
-            const resp = await fetch(`${API_BASE}/agent/sessions/${sessionId}/messages/batch`, {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                run_id: runId,
-                trace_id: traceId,
-                occurred_at: captured.occurred_at,
-                app_name: captured.app_name,
-                app_bundle_id: captured.app_bundle_id,
-                is_send: captured.is_send,
-                is_wechat: captured.is_wechat,
-                screenshot_path: captured.screenshot_path,
-                user_text: text,
-                messages: finalMessages,
-              }),
-            });
-            if (!resp.ok) {
-              logWarn("agent.persist.failed", { session_id: sessionId, status: resp.status });
+            const userMessage = finalMessages.find(
+              (m) => m.role === "user" && m.kind === "message",
+            );
+            if (userMessage) {
+              await appendAgentMessage({
+                sessionId,
+                role: "user",
+                kind: "message",
+                content: userMessage.content,
+              });
             }
+            await batchAppendAgentMessages(
+              sessionId,
+              finalMessages
+                .filter((m) => !(m.role === "user" && m.kind === "message"))
+                .map((m) => ({
+                  role: m.role,
+                  kind: m.kind,
+                  content: m.content,
+                  toolName: m.toolName ?? undefined,
+                  toolResult: m.toolResult,
+                  isError: m.isError,
+                })),
+            );
             void loadSessionList();
           } catch (e) {
             logError("agent.persist.error", { error: serializeError(e) });
