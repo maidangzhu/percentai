@@ -7,7 +7,7 @@
     "dev": "pnpm run auth:generate && tsx watch src/index.ts",
     "test": "tsx --test --test-concurrency=1 --experimental-test-module-mocks $(find src -name '*.test.ts' -type f)",
     "start": "node dist/index.js",
-    "build": "pnpm run auth:generate && tsc && mkdir -p dist/generated && cp -R src/generated/. dist/generated/",
+    "build": "pnpm run auth:generate && tsc && mkdir -p dist/generated && cp -R src/generated/. dist/generated/ && rm -f dist/index.js",
     "auth:db:push": "prisma db push --config prisma-auth.config.ts",
     "auth:generate": "prisma generate --config prisma-auth.config.ts"
   },
