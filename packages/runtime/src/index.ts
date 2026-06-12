@@ -15,6 +15,10 @@ export {
   type Model,
   type TextContent,
   type ToolResultMessage,
+  streamSimple,
+  completeSimple,
+  type SimpleStreamOptions,
+  type AssistantMessageEventStream,
 } from "@earendil-works/pi-ai";
 export { normalizeText, taskTitleSimilarity } from "./taskSimilarity.js";
 export {
@@ -33,6 +37,10 @@ import {
 } from "@earendil-works/pi-agent-core";
 import {
   EventStream,
+  streamSimple as piStreamSimple,
+  completeSimple as piCompleteSimple,
+  type AssistantMessageEventStream as PiAssistantMessageEventStream,
+  type SimpleStreamOptions as PiSimpleStreamOptions,
   parseStreamingJson,
   stream as piStream,
   type AssistantMessage,
