@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Log {
+  id             String     @id
+  occurredAt     DateTime   @map("occurred_at")
+  appName        String     @map("app_name")
+  appBundleId    String     @default("") @map("app_bundle_id")
+  isSend         Boolean    @default(false) @map("is_send")
+  isWechat       Boolean    @default(false) @map("is_wechat")
+  screenshotPath String?    @map("screenshot_path")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  chatTurns      ChatTurn[]
+  tasks          Task[]
+
+  @@index([occurredAt(sort: Desc)], map: "idx_logs_occurred_at")
+  @@index([appBundleId], map: "idx_logs_app_bundle_id")
+  @@map("logs")
+}
+
+model Person {
+  id        String     @id
+  name      String
+  clientApp String     @default("WeChat") @map("client_app")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at")
+  chatTurns ChatTurn[]
+  tasks     Task[]
+
+  @@unique([name, clientApp])
+  @@map("people")
+}
+
+model ChatTurn {
+  id            String        @id
+  logId         String        @map("log_id")
+  personId      String        @map("person_id")
+  topic         String        @default("")
+  capturedAt    DateTime      @map("captured_at")
+  rawAiResponse Json?         @map("raw_ai_response")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  log           Log           @relation(fields: [logId], references: [id], onDelete: Cascade)
+  person        Person        @relation(fields: [personId], references: [id])
+  messages      ChatMessage[]
+  tasks         Task[]
+
+  @@index([personId], map: "idx_chat_turns_person_id")
+  @@index([logId], map: "idx_chat_turns_log_id")
+  @@map("chat_turns")
+}
+
+model ChatMessage {
+  id               String   @id
+  turnId           String   @map("turn_id")
+  role             String
+  senderName       String?  @map("sender_name")
+  senderNormalized String?  @map("sender_normalized")
+  content          String
+  contentType      String   @default("text") @map("content_type")
+  quoteText        String?  @map("quote_text")
+  quoteSenderName  String?  @map("quote_sender_name")
+  quoteRole        String?  @map("quote_role")
+  quoteContentType String?  @map("quote_content_type")
+  isQuoted         Boolean  @default(false) @map("is_quoted")
+  isRevoked        Boolean  @default(false) @map("is_revoked")
+  messageKey       String   @default("") @map("message_key")
+  rawExtracted     Json?    @map("raw_extracted")
+  seq              Int      @default(0)
+  createdAt        DateTime @default(now()) @map("created_at")
+  turn             ChatTurn @relation(fields: [turnId], references: [id], onDelete: Cascade)
+
+  @@index([turnId, seq], map: "idx_chat_messages_turn_id")
+  @@index([messageKey], map: "idx_chat_messages_message_key")
+  @@map("chat_messages")
+}
+
+model Task {
+  id            String    @id
+  personId      String?   @map("person_id")
+  logId         String?   @map("log_id")
+  sourceTurnId  String?   @map("source_turn_id")
+  title         String
+  description   String    @default("")
+  dueAt         DateTime? @map("due_at")
+  status        String    @default("pending")
+  fingerprint   String    @unique
+  evidence      String    @default("")
+  rawAiResponse Json?     @map("raw_ai_response")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+  person        Person?   @relation(fields: [personId], references: [id])
+  log           Log?      @relation(fields: [logId], references: [id], onDelete: SetNull)
+  sourceTurn    ChatTurn? @relation(fields: [sourceTurnId], references: [id], onDelete: SetNull)
+
+  @@index([status, dueAt], map: "idx_tasks_status_due_at")
+  @@index([personId], map: "idx_tasks_person_id")
+  @@index([sourceTurnId], map: "idx_tasks_source_turn_id")
+  @@map("tasks")
+}
+
+// ---- Agent Chat Sessions ----
+// 「问屏幕」agent 对话的持久化。session 归属 user，messages 通过
+// onDelete: Cascade 跟随 session 删除。
+
+model AgentSession {
+  id            String         @id
+  userId        String         @map("user_id")
+  title         String         @default("")
+  screenContext Json?          @map("screen_context")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  messages      AgentMessage[]
+
+  @@index([userId, updatedAt(sort: Desc)], map: "idx_agent_sessions_user_updated")
+  @@map("agent_sessions")
+}
+
+model AgentMessage {
+  id         String       @id
+  sessionId  String       @map("session_id")
+  role       String       // "user" | "assistant"
+  kind       String       // "message" | "reasoning" | "tool_call" | "tool_result" | "error"
+  content    String       @default("")
+  toolName   String?      @map("tool_name")
+  toolInput  Json?        @map("tool_input")
+  toolResult Json?        @map("tool_result")
+  isError    Boolean      @default(false) @map("is_error")
+  seq        Int          @default(0)
+  createdAt  DateTime     @default(now()) @map("created_at")
+  session    AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, seq], map: "idx_agent_messages_session_seq")
+  @@map("agent_messages")
+}
