@@ -39,7 +39,7 @@ const proxyBodySchema = z.object({
     sessionId: z.string().optional(),
     apiKey: z.string().optional(),
     signal: z.unknown().optional(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
   }).passthrough(),
 });
 
