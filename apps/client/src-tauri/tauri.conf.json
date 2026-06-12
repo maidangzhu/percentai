@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "percent-tracker",
+  "productName": "percent",
   "version": "0.1.0",
-  "identifier": "com.percent-tracker.app",
+  "identifier": "com.percent.app",
   "build": {
     "beforeDevCommand": "pnpm run dev:vite",
     "beforeBuildCommand": "pnpm run build",

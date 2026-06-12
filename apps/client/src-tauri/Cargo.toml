@@ -1,5 +1,5 @@
 [package]
-name = "percent-tracker"
+name = "percent"
 version = "0.1.0"
 description = "A global enter key tracker with floating bubble UI"
 edition = "2021"

@@ -79,7 +79,7 @@ pnpm dev
 
 `pnpm dev` 会并行启动：
 - `percent-server`（Hono，端口默认 3001）
-- `percent-tracker`（Tauri dev，会弹一个原生窗口）
+- `percent`（Tauri dev，会弹一个原生窗口）
 - `percent-cms`（Next.js，端口默认 3000）
 
 首次启动会引导你授予 macOS 三类权限：屏幕录制、辅助功能、输入监控。  
