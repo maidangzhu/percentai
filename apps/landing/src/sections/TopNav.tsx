@@ -37,7 +37,7 @@ export function TopNav() {
             <ArrowUpRight size={13} strokeWidth={1.75} />
           </a>
           <a
-            href="#download"
+            href="https://github.com/maidangzhu/percentai/releases"
             className="ml-1 inline-flex items-center gap-1.5 rounded-md bg-foreground px-3.5 py-1.5 font-medium text-background transition-opacity hover:opacity-85"
           >
             下载 macOS

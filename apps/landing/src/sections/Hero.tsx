@@ -38,12 +38,12 @@ export function Hero() {
 
           <p className="max-w-xl text-pretty text-[17px] leading-relaxed text-muted-foreground">
             Percent 是 macOS 上的微信 AI 伙伴。不切窗口、不截图按钮、不上传云。
-            本地 SQLite 替你记住聊过谁、聊了什么、答应过什么事。
+            替你记住聊过谁、聊了什么、答应过什么事。
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <a
-              href="#download"
+              href="https://github.com/maidangzhu/percentai/releases"
               className="group inline-flex items-center gap-2 rounded-md bg-foreground px-5 py-2.5 text-[14px] font-medium text-background transition-opacity hover:opacity-85"
             >
               <ArrowDownToLine size={15} strokeWidth={1.75} />

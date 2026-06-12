@@ -21,7 +21,7 @@ export function Footer() {
           items={[
             { label: "功能", href: "#capabilities" },
             { label: "隐私", href: "#privacy" },
-            { label: "下载 macOS", href: "#download" },
+            { label: "下载 macOS", href: "https://github.com/maidangzhu/percentai/releases" },
           ]}
         />
         <FooterCol
