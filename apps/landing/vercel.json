@@ -3,5 +3,5 @@
   "framework": null,
   "buildCommand": "pnpm --filter percent-landing run build",
   "installCommand": "pnpm install --frozen-lockfile",
-  "outputDirectory": "apps/landing/dist"
+  "outputDirectory": "dist"
 }
