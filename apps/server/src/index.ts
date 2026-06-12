@@ -3,27 +3,14 @@ import { serve } from "@hono/node-server";
 
 import { auth } from "./auth/index.js";
 import { logInfo, logWarn } from "./lib/appLogger.js";
-import { initializeLocalDatabase } from "./db/init.js";
-import { prisma } from "./db/client.js";
 import { createApp } from "./app.js";
-import { dedupeAllPeopleOnStartup } from "./lib/peopleMerge.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 
 const app = await createApp(auth);
-const db = await initializeLocalDatabase();
-
-// 启动时去重历史 people 数据：把 LLM 不同写法留下的同一人合并
-dedupeAllPeopleOnStartup(prisma)
-  .then(({ scanned, merged }) => {
-    if (merged > 0) {
-      logInfo("people.dedupe.startup", { scanned, merged });
-    }
-  })
-  .catch((e) => logWarn("people.dedupe.startup_failed", { error: String(e) }));
 
 const server = serve({ fetch: app.fetch, port: PORT }, () => {
-  logInfo("server.started", { url: `http://localhost:${PORT}`, database_path: db.path });
+  logInfo("server.started", { url: `http://localhost:${PORT}` });
 });
 
 // 优雅退出：tsx watch 重新加载时旧进程必须先释放 3000 端口，

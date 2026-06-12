@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { authPrisma } from "../auth/db.js";
-import { newSnowflakeId } from "./snowflake.js";
+
+const newId = () => randomUUID();
 
 // 新用户初始赠送的点数
 export const SIGNUP_BONUS = 2000;
@@ -63,14 +65,14 @@ export async function ensureSignupBonus(userId: string): Promise<number> {
   const created = await authPrisma.$transaction(async (tx) => {
     const createdCredit = await tx.userCredit.create({
       data: {
-        id: newSnowflakeId(),
+        id: newId(),
         userId,
         balance: SIGNUP_BONUS,
       },
     });
     await tx.creditTransaction.create({
       data: {
-        id: newSnowflakeId(),
+        id: newId(),
         userId,
         delta: SIGNUP_BONUS,
         balanceAfter: SIGNUP_BONUS,
@@ -115,7 +117,7 @@ export async function adjustCredits(opts: AdjustOptions): Promise<number> {
     });
     await tx.creditTransaction.create({
       data: {
-        id: newSnowflakeId(),
+        id: newId(),
         userId,
         delta,
         balanceAfter,

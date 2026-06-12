@@ -1,13 +1,12 @@
 import type { MiddlewareHandler } from "hono";
 import { elapsedMs, logError, logInfo } from "../lib/appLogger.js";
-import { sanitizeForLog } from "../lib/logSanitizer.js";
 
 function headersForLog(headers: Headers) {
   const output: Record<string, string> = {};
   for (const [key, value] of headers.entries()) {
     output[key] = value;
   }
-  return sanitizeForLog(output);
+  return output;
 }
 
 async function requestBodyForLog(request: Request) {
@@ -16,7 +15,7 @@ async function requestBodyForLog(request: Request) {
   if (!contentType.includes("application/json")) {
     return contentType ? { skipped: true, content_type: contentType } : undefined;
   }
-  return sanitizeForLog(await request.clone().json().catch(() => ({ unreadable: true })));
+  return await request.clone().json().catch(() => ({ unreadable: true }));
 }
 
 async function responseBodyForLog(response: Response) {
@@ -24,7 +23,7 @@ async function responseBodyForLog(response: Response) {
   if (!contentType.includes("application/json")) {
     return contentType ? { skipped: true, content_type: contentType } : undefined;
   }
-  return sanitizeForLog(await response.clone().json().catch(() => ({ unreadable: true })));
+  return await response.clone().json().catch(() => ({ unreadable: true }));
 }
 
 export function apiLogger(): MiddlewareHandler {

@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { PrismaNeon } from "@prisma/adapter-neon";
 import { PrismaClient } from "../generated/auth-prisma/client.js";
-import { attachPrismaQueryLogger } from "../lib/prismaQueryLogger.js";
 
 const authDir = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(authDir, "../../.env") });
@@ -35,10 +34,7 @@ const adapter = new PrismaNeon(
 export const authPrisma = new PrismaClient({
   adapter,
   log: [
-    { emit: "event", level: "query" },
     { emit: "event", level: "warn" },
     { emit: "event", level: "error" },
   ],
 });
-
-attachPrismaQueryLogger(authPrisma, "auth-neon");
