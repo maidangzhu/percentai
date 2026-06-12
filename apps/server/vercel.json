@@ -1,5 +1,10 @@
 {
   "buildCommand": "pnpm run build",
   "installCommand": "npm install --no-workspaces",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "functions": {
+    "dist/vercel.js": {
+      "runtime": "nodejs24.x"
+    }
+  }
 }
