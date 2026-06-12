@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Percent — 项目宣讲</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-2: #111113;
+    --card: #16161a;
+    --border: rgba(255, 255, 255, 0.12);
+    --border-2: rgba(255, 255, 255, 0.08);
+    --fg: #ffffff;
+    --fg-2: rgba(255, 255, 255, 0.88);
+    --fg-3: rgba(255, 255, 255, 0.65);
+    --accent: #ffffff;
+    --other: #4f7cff;
+    --self: #2a2a2e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Inter", sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  .deck { position: relative; width: 100vw; height: 100vh; }
+  .slide { position: absolute; inset: 0; display: none; padding: 64px 80px;
+    flex-direction: column; justify-content: center; }
+  .slide.active { display: flex; }
+  .slide::before { content: attr(data-num); position: absolute; top: 28px; left: 80px;
+    font-size: 11px; letter-spacing: 0.18em; color: var(--fg-3); text-transform: uppercase;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .slide::after { content: attr(data-tag); position: absolute; top: 28px; right: 80px;
+    font-size: 11px; letter-spacing: 0.18em; color: var(--fg-3); text-transform: uppercase;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  h1 { font-size: 64px; line-height: 1.05; letter-spacing: -0.03em; font-weight: 600; }
+  h2 { font-size: 50px; line-height: 1.12; letter-spacing: -0.02em; font-weight: 600;
+    max-width: 920px; }
+  h3 { font-size: 26px; line-height: 1.3; font-weight: 500; color: var(--fg-2); }
+  p.lede { font-size: 24px; line-height: 1.5; color: var(--fg-2); max-width: 760px; margin-top: 24px; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* nav */
+  .nav { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 10; }
+  .nav button { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3);
+    border: 0; padding: 0; cursor: pointer; transition: all .2s; }
+  .nav button.active { background: var(--fg); transform: scale(1.4); }
+  .counter { position: fixed; bottom: 28px; right: 80px; z-index: 10;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+    color: var(--fg-3); }
+  .help { position: fixed; bottom: 28px; left: 80px; z-index: 10;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+    color: var(--fg-3); letter-spacing: 0.1em; }
+
+  /* common */
+  .eyebrow { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--fg-3); font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    margin-bottom: 18px; }
+  .row { display: flex; gap: 24px; margin-top: 48px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+    border-radius: 999px; background: var(--card); border: 1px solid var(--border);
+    font-size: 12px; color: var(--fg-2); font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.04em; }
+
+  /* slide 1 — hook */
+  .hook-stage { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; }
+  .hook-stage h1 { max-width: 1080px; text-align: center; }
+  .bubble { position: absolute; bottom: 8%; right: 12%; width: 60px; height: 60px;
+    border-radius: 50%; background: var(--accent); display: grid; place-items: center;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.3); }
+  .bubble svg { color: var(--bg); }
+  .bubble.ring::before { content: ""; position: absolute; inset: -6px; border-radius: 50%;
+    border: 2px solid var(--accent); animation: ring 1.8s ease-out infinite; }
+  @keyframes ring { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.6); opacity: 0; } }
+
+  /* slide 2 — problem */
+  .three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 48px; }
+  .issue { padding: 32px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; min-height: 260px; display: flex; flex-direction: column;
+    justify-content: space-between; }
+  .issue .num { font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; color: var(--fg-3); letter-spacing: 0.18em; }
+  .issue h3 { color: var(--fg); font-size: 24px; line-height: 1.25; font-weight: 600;
+    margin: 14px 0 12px; }
+  .issue p { color: var(--fg-2); font-size: 17px; line-height: 1.55; }
+  .issue .quote { font-style: normal; color: var(--fg-2); font-size: 15px;
+    padding: 10px 14px; background: var(--bg-2); border-left: 2px solid var(--border);
+    border-radius: 0 6px 6px 0; margin-top: 14px; }
+
+  /* slide 3 — solution */
+  .slide.centered { align-items: center; text-align: center; }
+  .slide.centered > * { max-width: 1100px; }
+  .slide.centered h2 { max-width: 1000px; }
+  /* 多卡片 section: 保持卡片内文字左对齐 */
+  .slide.centered .scenes,
+  .slide.centered .shipped,
+  .slide.centered .two-col { text-align: left; }
+  .keys { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 36px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px;
+    border-radius: 999px; background: var(--card); border: 1px solid var(--border);
+    font-size: 16px; color: var(--fg); font-weight: 500;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.04em; }
+  /* IM mockup — big, centered, wider aspect */
+  .mockup-stage { width: 100%; max-width: 1000px; margin-top: 40px; }
+  .mockup { background: var(--card); border: 1px solid var(--border); border-radius: 20px;
+    padding: 20px; aspect-ratio: 16 / 9; display: flex; }
+  .mockup .screen { background: var(--bg-2); border: 1px solid var(--border-2);
+    border-radius: 14px; width: 100%; height: 100%; padding: 22px; position: relative;
+    overflow: hidden; display: flex; flex-direction: column; }
+  .mockup .hdr { display: flex; align-items: center; gap: 10px; padding-bottom: 14px;
+    border-bottom: 1px solid var(--border-2); margin-bottom: 16px; }
+  .mockup .hdr .av { width: 28px; height: 28px; border-radius: 50%;
+    background: var(--other); color: #fff; font-size: 13px; display: grid; place-items: center;
+    font-weight: 600; }
+  .mockup .hdr .name { font-size: 17px; color: var(--fg); font-weight: 500; }
+  .mockup .hdr .sub { font-size: 12px; color: var(--fg-3); margin-left: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .mockup .thread { flex: 1; display: flex; flex-direction: column; gap: 10px;
+    justify-content: flex-start; }
+  .msg { display: flex; gap: 8px; align-items: flex-end; }
+  .msg.other { justify-content: flex-start; }
+  .msg.self { justify-content: flex-end; }
+  .msg .av-mini { width: 20px; height: 20px; border-radius: 4px; flex-shrink: 0;
+    font-size: 11px; display: grid; place-items: center; font-weight: 600; }
+  .msg.other .av-mini { background: var(--other); color: #fff; }
+  .msg.self .av-mini { background: var(--fg-3); color: var(--bg); }
+  .msg .b { max-width: 72%; padding: 10px 14px; border-radius: 12px; font-size: 15px;
+    line-height: 1.4; }
+  .msg.other .b { background: var(--card); color: var(--fg); border: 1px solid var(--border-2); }
+  .msg.self .b { background: var(--self); color: var(--fg); }
+  .mockup .popover { position: absolute; right: 82px; bottom: 22px; width: 290px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+  .mockup .popover .lbl { font-size: 11px; color: var(--fg-3); letter-spacing: 0.16em;
+    text-transform: uppercase; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .mockup .popover .txt { font-size: 16px; color: var(--fg); margin-top: 6px; line-height: 1.4; }
+  .mockup .popover .tabs { display: flex; gap: 6px; margin-top: 10px; }
+  .mockup .popover .tab { font-size: 13px; padding: 5px 10px; border-radius: 5px;
+    background: var(--bg-2); color: var(--fg-2); }
+  .mockup .popover .tab.on { background: var(--fg); color: var(--bg); }
+  .mockup .bubble { position: absolute; bottom: 22px; right: 22px; width: 46px; height: 46px;
+    background: var(--fg); border-radius: 50%; display: grid; place-items: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4); z-index: 2; }
+  .mockup .bubble svg { width: 20px; height: 20px; color: var(--bg); }
+
+  /* slide 4 — demo */
+  .scenes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 48px; max-width: 1200px; margin-left: auto; margin-right: auto; width: 100%; }
+  .scene { padding: 32px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; min-height: 380px; display: flex; flex-direction: column; gap: 18px; }
+  .scene .flow { display: flex; flex-direction: column; gap: 12px; font-size: 16px;
+    color: var(--fg-2); line-height: 1.5; }
+  .scene .flow .step { padding: 12px 14px; background: var(--bg-2); border-radius: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14px;
+    color: var(--fg); }
+  .scene .arrow { text-align: center; color: var(--fg-3); font-size: 14px; }
+
+  /* slide 5 — what's shipped */
+  .shipped { display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; margin-top: 48px; max-width: 1200px; margin-left: auto; margin-right: auto; width: 100%; }
+  .ship-card { padding: 40px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; }
+  .ship-card h3 { color: var(--fg); font-size: 16px; font-weight: 600; margin-bottom: 24px;
+    letter-spacing: 0.06em; text-transform: uppercase; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .ship-card ul { list-style: none; display: flex; flex-direction: column; gap: 18px; }
+  .ship-card li { display: flex; align-items: flex-start; gap: 14px; font-size: 18px;
+    color: var(--fg); line-height: 1.5; }
+  .ship-card li .check { width: 22px; height: 22px; border-radius: 5px; flex-shrink: 0;
+    background: var(--fg); color: var(--bg); display: grid; place-items: center;
+    font-size: 13px; font-weight: 700; margin-top: 1px; }
+  .ship-card .small { font-size: 15px; color: var(--fg-2); margin-top: 24px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* slide 6 — next + ask */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 48px; max-width: 1200px; margin-left: auto; margin-right: auto; width: 100%; }
+  .col { padding: 36px 32px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; }
+  .col h3 { color: var(--fg); font-size: 16px; font-weight: 600; margin-bottom: 22px;
+    letter-spacing: 0.06em; text-transform: uppercase; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .col ul { list-style: none; display: flex; flex-direction: column; gap: 18px; }
+  .col li { font-size: 20px; color: var(--fg-2); line-height: 1.5; padding-left: 22px;
+    position: relative; }
+  .col li::before { content: ""; position: absolute; left: 0; top: 15px;
+    width: 8px; height: 2px; background: var(--fg-3); }
+  .col li.tentative { color: var(--fg-3); }
+  .col li.tentative::before { background: transparent; border-top: 1px dashed var(--fg-3);
+    width: 8px; }
+
+  /* slide 7 — q&a */
+  .qa { flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 32px; text-align: center; }
+  .qa h1 { font-size: 120px; font-weight: 300; letter-spacing: -0.04em; }
+  .qa .contact { font-size: 14px; color: var(--fg-2);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .qa .contact a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--border); }
+  .qa .legend { color: var(--fg-3); font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; letter-spacing: 0.12em; }
+
+  /* animation stage (slides 4/5/6) */
+  .anim-stage {
+    width: 100%;
+    max-width: 1000px;
+    aspect-ratio: 16 / 9;
+    margin: 36px auto 0;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .anim-content { width: 100%; height: 100%; display: flex; flex-direction: column; }
+  .anim-stage .chat-hdr { display: flex; align-items: center; gap: 10px; padding-bottom: 14px;
+    border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .anim-stage .chat-hdr .av { width: 26px; height: 26px; border-radius: 50%;
+    background: var(--other); color: #fff; font-size: 14px; display: grid; place-items: center;
+    font-weight: 600; }
+  .anim-stage .chat-hdr .name { font-size: 18px; color: var(--fg); font-weight: 500; }
+  .anim-stage .chat-hdr .sub { font-size: 13px; color: var(--fg-3); margin-left: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .anim-stage .msg { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 12px; }
+  .anim-stage .msg.other { justify-content: flex-start; }
+  .anim-stage .msg.self { justify-content: flex-end; }
+  .anim-stage .msg .av-mini { width: 22px; height: 22px; border-radius: 4px; flex-shrink: 0;
+    font-size: 12px; display: grid; place-items: center; font-weight: 600; }
+  .anim-stage .msg.other .av-mini { background: var(--other); color: #fff; }
+  .anim-stage .msg.self .av-mini { background: var(--fg-3); color: var(--bg); }
+  .anim-stage .msg .b { max-width: 70%; padding: 10px 14px; border-radius: 12px;
+    font-size: 16px; line-height: 1.4; }
+  .anim-stage .msg.other .b { background: var(--card); color: var(--fg);
+    border: 1px solid var(--border); }
+  .anim-stage .msg.self .b { background: var(--self); color: var(--fg); }
+
+  .anim-stage .input-row { display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    margin-top: auto; }
+  .anim-stage .input-row .text { flex: 1; font-size: 14px; color: var(--fg-3);
+    display: flex; align-items: center; }
+  .anim-stage .input-row .enter-key { width: 36px; height: 28px; border-radius: 6px;
+    background: var(--fg-3); color: var(--bg); font-size: 14px; display: grid;
+    place-items: center; font-weight: 700; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    transition: background 0.15s; }
+  .anim-stage .cursor { display: inline-block; width: 2px; height: 16px; background: var(--fg);
+    vertical-align: middle; margin-left: 4px; }
+
+  .anim-stage .enter-flash { position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%); padding: 18px 32px; background: var(--fg);
+    color: var(--bg); border-radius: 14px; font-size: 24px; font-weight: 700;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    box-shadow: 0 8px 32px rgba(255,255,255,0.25); pointer-events: none; }
+  .anim-stage .enter-flash .keycap { display: inline-block; padding: 0 8px; }
+
+  .anim-stage .toast { position: absolute; right: 28px; bottom: 28px; padding: 10px 16px;
+    background: var(--ok); color: #000; border-radius: 8px; font-size: 14px;
+    font-weight: 600; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+  .anim-stage .toast .check { display: grid; place-items: center; width: 18px; height: 18px;
+    border-radius: 50%; background: #000; color: var(--ok); font-size: 10px;
+    font-weight: 900; }
+
+  .anim-stage .bubble { position: absolute; bottom: 28px; right: 28px; width: 50px; height: 50px;
+    background: var(--fg); border-radius: 50%; display: grid; place-items: center;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5); z-index: 5; }
+  .anim-stage .bubble svg { color: var(--bg); width: 22px; height: 22px; }
+
+  .anim-stage .popover { position: absolute; right: 92px; bottom: 28px; width: 290px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 4; }
+  .anim-stage .popover .lbl { font-size: 11px; color: var(--fg-3); letter-spacing: 0.16em;
+    text-transform: uppercase; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .anim-stage .popover .txt { font-size: 15px; color: var(--fg); margin-top: 6px; line-height: 1.4; }
+  .anim-stage .popover .tabs { display: flex; gap: 6px; margin-top: 10px; }
+  .anim-stage .popover .tab { font-size: 12px; padding: 4px 9px; border-radius: 5px;
+    background: var(--bg-2); color: var(--fg-2); }
+  .anim-stage .popover .tab.on { background: var(--fg); color: var(--bg); }
+  .anim-stage .popover .copied { display: flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--ok); margin-top: 8px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  .anim-stage .task-card { position: absolute; right: 92px; bottom: 28px; width: 320px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 4; }
+  .anim-stage .task-card .lbl { font-size: 11px; color: var(--fg-3); letter-spacing: 0.16em;
+    text-transform: uppercase; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .anim-stage .task-card .title { font-size: 16px; color: var(--fg); font-weight: 600;
+    margin-top: 6px; line-height: 1.3; }
+  .anim-stage .task-card .when { font-size: 12px; color: var(--fg-3); margin-top: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .anim-stage .task-card .actions { display: flex; gap: 8px; margin-top: 12px; }
+  .anim-stage .task-card .btn { flex: 1; padding: 8px 0; border-radius: 6px; font-size: 13px;
+    font-weight: 600; text-align: center; }
+  .anim-stage .task-card .btn-primary { background: var(--fg); color: var(--bg); }
+  .anim-stage .task-card .btn-secondary { background: var(--bg-2); color: var(--fg-2);
+    border: 1px solid var(--border); }
+
+  .anim-stage .spinner { position: absolute; right: 28px; bottom: 28px; width: 50px; height: 50px;
+    border: 3px solid var(--border); border-top-color: var(--fg); border-radius: 50%;
+    box-sizing: border-box; z-index: 5; }
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+  <!-- 1: HOOK -->
+  <section class="slide active" data-num="01 / Hook" data-tag="Percent / Project Pitch">
+    <div class="hook-stage">
+      <h1>你 Mac 屏幕角落<br/>那个 60 像素的圆,<br/><span style="color: var(--fg-2)">知道你正在回哪条微信。</span></h1>
+      <div class="bubble ring">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="2.6" />
+          <circle cx="17" cy="17" r="2.6" />
+          <path d="M18.5 4.5 5.5 19.5" />
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2: PROBLEM -->
+  <section class="slide" data-num="02 / Problem" data-tag="Why this friction">
+    <div class="eyebrow">Problem</div>
+    <h2>微信对话是日常, 但回消息是负担。</h2>
+    <div class="three-col">
+      <div class="issue">
+        <div>
+          <div class="num">/ 01</div>
+          <h3>"怎么回"是高频微决策</h3>
+          <p>每条消息都要花 1–2 分钟: 用什么语气、要不要接话、怎么不冷场。回得累, 不回更累。</p>
+        </div>
+      </div>
+      <div class="issue">
+        <div>
+          <div class="num">/ 02</div>
+          <h3>隐性承诺混在闲聊里</h3>
+          <p>"明天下午你过来看看" / "回头把资料发我" —— 说完就沉到聊天记录里, 转头就忘。</p>
+          <div class="quote">"上次答应过这个客户什么事来着?"</div>
+        </div>
+      </div>
+      <div class="issue">
+        <div>
+          <div class="num">/ 03</div>
+          <h3>截图给 AI = 上下文离开你 Mac</h3>
+          <p>截图复制到 ChatGPT: 一来一回切窗口, 二来对话原文出了本机。云端 IM 助手更直接: 聊天记录在它那边。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3: SOLUTION -->
+  <section class="slide centered" data-num="03 / Solution" data-tag="What Percent does">
+    <div class="eyebrow">Solution</div>
+    <h2>常驻 Mac 角落的微信 AI 伙伴。</h2>
+    <p class="lede">微信里按 Enter / 截个屏, 它读上下文给出建议; 你看一眼, 改一下, ⌘V 粘贴发送。<br/>
+      <strong style="color: var(--fg)">永远不替你发。</strong></p>
+    <div class="mockup-stage">
+      <div class="mockup">
+        <div class="screen">
+          <div class="hdr">
+            <div class="av">张</div>
+            <div class="name">张总</div>
+            <div class="sub">微信 · 群聊</div>
+          </div>
+          <div class="thread">
+            <div class="msg other">
+              <div class="av-mini">张</div>
+              <div class="b">也许会更久，等见面，我简单跟你说下</div>
+            </div>
+            <div class="msg self">
+              <div class="b">没问题的，你先去忙 我们下周详聊</div>
+              <div class="av-mini">我</div>
+            </div>
+            <div class="msg other">
+              <div class="av-mini">张</div>
+              <div class="b">行，这两天我确定工作安排后跟你说</div>
+            </div>
+            <div class="msg self">
+              <div class="b">好的，你先忙</div>
+              <div class="av-mini">我</div>
+            </div>
+          </div>
+          <div class="popover">
+            <div class="lbl">回复 · recommend</div>
+            <div class="txt">等你消息，随时可出发</div>
+            <div class="tabs">
+              <div class="tab on">推荐</div>
+              <div class="tab">沉稳</div>
+              <div class="tab">轻松</div>
+            </div>
+          </div>
+          <div class="bubble">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="7" cy="7" r="2.6" />
+              <circle cx="17" cy="17" r="2.6" />
+              <path d="M18.5 4.5 5.5 19.5" />
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="keys">
+      <span class="pill">local-first</span>
+      <span class="pill">永远只是建议</span>
+      <span class="pill">你主动触发</span>
+    </div>
+  </section>
+
+  <!-- 4: ANIMATION - Enter -->
+  <section class="slide centered" data-num="04 / Demo · Enter" data-tag="按 Enter 自动留痕">
+    <div class="eyebrow">/ 按 Enter 自动留痕</div>
+    <h2>按 Enter, 这条对话自动存本地。</h2>
+    <p class="lede" style="font-size: 22px; margin-top: 18px">微信里打完字按回车, 这条对话自动存到本地 SQLite, 不打扰你。</p>
+    <div id="anim-stage-1" class="anim-stage"></div>
+  </section>
+
+  <!-- 5: ANIMATION - Reply -->
+  <section class="slide centered" data-num="05 / Demo · Reply" data-tag="帮我回">
+    <div class="eyebrow">/ 帮我回</div>
+    <h2>3 风格回复, 默认复制, ⌘V 发送。</h2>
+    <p class="lede" style="font-size: 22px; margin-top: 18px">气泡 → 3 风格回复 → 默认复制 → ⌘V。永远不替你发。</p>
+    <div id="anim-stage-2" class="anim-stage"></div>
+  </section>
+
+  <!-- 6: ANIMATION - Task -->
+  <section class="slide centered" data-num="06 / Demo · Task" data-tag="记任务">
+    <div class="eyebrow">/ 记任务</div>
+    <h2>识别隐性 todo, 弹确认卡, 你点头才入库。</h2>
+    <p class="lede" style="font-size: 22px; margin-top: 18px">从聊天里自动捞出"明天下午 3 点体检你来吗"这种, 让你确认再写库。</p>
+    <div id="anim-stage-3" class="anim-stage"></div>
+  </section>
+
+  <!-- 7: WHAT'S SHIPPED -->
+  <section class="slide centered" data-num="07 / What's shipped" data-tag="MVP status">
+    <div class="eyebrow">What's shipped</div>
+    <h2>MVP 已能用, 范围先压在微信。</h2>
+    <div class="shipped">
+      <div class="ship-card">
+        <h3>4 个核心动作 (在跑)</h3>
+        <ul>
+          <li><span class="check">✓</span><span><strong>按 Enter 自动留痕</strong> — 微信里按下回车, 对话自动存本地</span></li>
+          <li><span class="check">✓</span><span><strong>帮我回</strong> — 截屏 → 3 风格回复建议, 默认复制</span></li>
+          <li><span class="check">✓</span><span><strong>记任务</strong> — 隐性 todo 识别 → 确认卡 → 写本地</span></li>
+          <li><span class="check">✓</span><span><strong>问屏幕</strong> — 截屏 + 一句话, agent 工具调聊天/任务回复</span></li>
+        </ul>
+      </div>
+      <div class="ship-card">
+        <h3>3 个代码模块 (在跑)</h3>
+        <ul>
+          <li><span class="check">✓</span><span><strong>Tauri 客户端</strong> — bubble 浮窗 + 主窗口, Rust + React</span></li>
+          <li><span class="check">✓</span><span><strong>Hono server</strong> — 截屏 / analyze / suggest / tasks / agent 路由</span></li>
+          <li><span class="check">✓</span><span><strong>Next.js CMS</strong> — 内部运营, 只读 Neon (账号/积分), 看不到聊天</span></li>
+        </ul>
+        <div class="small">end-to-end 延迟 ≈ 8s (持续压, 不是卖点)</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8: NEXT + ASK -->
+  <section class="slide centered" data-num="08 / Next + Ask" data-tag="Direction (tentative)">
+    <div class="eyebrow">Next + Ask</div>
+    <h2>方向还在演化, 真实用户反馈最重要。</h2>
+    <div class="two-col">
+      <div class="col">
+        <h3>Next (tentative)</h3>
+        <ul>
+          <li>把延迟从 8s 继续往下压 (当前最大体验瓶颈)</li>
+          <li>"帮我回" 覆盖更多对话类型 / 群聊场景</li>
+          <li class="tentative">多模态输入: 选中文本 / 语音 (探索中, 不确定)</li>
+          <li class="tentative">更自然的触发方式 (持续研究中)</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3>Ask</h3>
+        <ul>
+          <li>5–10 个真实用户: 把 bubble 用 1 周, 给反馈</li>
+          <li>你最常回的是哪类消息? 哪些话它没法帮上?</li>
+          <li>记任务弹得太频繁 / 太沉默? 阈值在哪?</li>
+        </ul>
+        <p class="lede" style="font-size: 16px; margin-top: 28px; color: var(--fg-2)">
+          反馈: <span class="mono">&lt;your-email&gt;</span> · GitHub issues
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9: Q&A -->
+  <section class="slide" data-num="09 / Q & A" data-tag="Thanks">
+    <div class="qa">
+      <h1 style="font-weight: 300">Q &amp; A</h1>
+      <div class="legend">thank you</div>
+      <div class="contact">
+        GitHub: <a href="https://github.com/maidangzhu/percentai">github.com/maidangzhu/percentai</a>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav" id="nav"></div>
+<div class="counter" id="counter"></div>
+<div class="help">← → · space</div>
+
+<script type="module">
+  import htm from 'https://esm.sh/htm@3.1.1';
+  import React from 'https://esm.sh/react@18.3.1';
+  import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+  import { motion } from 'https://esm.sh/framer-motion@11.11.0';
+
+  const html = htm.bind(React.createElement);
+
+  function Chat({ name, avatar, messages }) {
+    return html`
+      <div className="chat-hdr">
+        <div className="av">${avatar}</div>
+        <div className="name">${name}</div>
+        <div className="sub">微信</div>
+      </div>
+      ${messages.map((m, i) => html`
+        <div key=${i} className=${'msg ' + m.role}>
+          ${m.role === 'other' ? html`<div className="av-mini">${avatar}</div>` : null}
+          <div className="b">${m.text}</div>
+          ${m.role === 'self' ? html`<div className="av-mini">我</div>` : null}
+        </div>
+      `)}
+    `;
+  }
+
+  // 4s loop
+  function EnterDemo() {
+    return html`
+      <div className="anim-content">
+        <${Chat} name="张总" avatar="张" messages=${[
+          { role: 'other', text: '今晚吃啥?' },
+          { role: 'self',  text: '火锅?' },
+          { role: 'other', text: '好 我来订位' },
+        ]} />
+        <div className="input-row">
+          <div className="text">
+            <span>说点什么...</span>
+            <${motion.span}
+              className="cursor"
+              animate=${{ opacity: [1, 1, 0, 0] }}
+              transition=${{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+            />
+          </div>
+          <${motion.div}
+            className="enter-key"
+            animate=${{
+              backgroundColor: [
+                'rgba(255,255,255,0.65)', 'rgba(255,255,255,0.65)',
+                'rgb(255,255,255)', 'rgb(255,255,255)',
+                'rgba(255,255,255,0.65)',
+              ],
+            }}
+            transition=${{ duration: 4, times: [0, 0.2, 0.27, 0.4, 0.5], repeat: Infinity }}
+          >⏎</${motion.div}>
+        </div>
+        <${motion.div}
+          className="enter-flash"
+          initial=${{ opacity: 0, scale: 0.6 }}
+          animate=${{ opacity: [0, 0, 1, 1, 0], scale: [0.6, 0.6, 1.3, 1, 0.9] }}
+          transition=${{ duration: 4, times: [0, 0.22, 0.27, 0.4, 0.5], repeat: Infinity }}
+        ><span className="keycap">⏎</span> ENTER</${motion.div}>
+        <${motion.div}
+          className="toast"
+          initial=${{ opacity: 0, y: 12 }}
+          animate=${{ opacity: [0, 0, 1, 1, 0], y: [12, 12, 0, 0, -8] }}
+          transition=${{ duration: 4, times: [0, 0.3, 0.38, 0.85, 0.95], repeat: Infinity }}
+        >
+          <span className="check">✓</span>已存到本地
+        </${motion.div}>
+      </div>
+    `;
+  }
+
+  // 5s loop
+  function ReplyDemo() {
+    return html`
+      <div className="anim-content">
+        <${Chat} name="张总" avatar="张" messages=${[
+          { role: 'other', text: '今晚吃啥?' },
+          { role: 'self',  text: '火锅?' },
+          { role: 'other', text: '行, 你定, 几点?' },
+        ]} />
+        <${motion.div}
+          className="bubble"
+          initial=${{ scale: 1 }}
+          animate=${{
+            scale: [1, 1.2, 1, 1, 1],
+            boxShadow: [
+              '0 6px 20px rgba(0,0,0,0.5)',
+              '0 0 0 8px rgba(255,255,255,0.3), 0 6px 20px rgba(0,0,0,0.5)',
+              '0 6px 20px rgba(0,0,0,0.5)',
+              '0 6px 20px rgba(0,0,0,0.5)',
+              '0 6px 20px rgba(0,0,0,0.5)',
+            ],
+          }}
+          transition=${{ duration: 5, times: [0, 0.18, 0.3, 0.95, 1], repeat: Infinity }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="7" cy="7" r="2.6"/>
+            <circle cx="17" cy="17" r="2.6"/>
+            <path d="M18.5 4.5 5.5 19.5"/>
+          </svg>
+        </${motion.div}>
+        <${motion.div}
+          className="popover"
+          initial=${{ opacity: 0, x: 30, scale: 0.95 }}
+          animate=${{ opacity: [0, 0, 1, 1, 1, 0], x: [30, 30, 0, 0, 0, 20] }}
+          transition=${{ duration: 5, times: [0, 0.32, 0.4, 0.85, 0.92, 1], repeat: Infinity }}
+        >
+          <div className="lbl">回复 · recommend</div>
+          <div className="txt">行, 6:30 怎么样</div>
+          <div className="tabs">
+            <${motion.div}
+              className="tab on"
+              animate=${{ scale: [1, 1, 1.08, 1] }}
+              transition=${{ duration: 5, times: [0, 0.55, 0.62, 0.85], repeat: Infinity }}
+            >推荐</${motion.div}>
+            <div className="tab">沉稳</div>
+            <div className="tab">轻松</div>
+          </div>
+          <${motion.div}
+            className="copied"
+            initial=${{ opacity: 0, y: -4 }}
+            animate=${{ opacity: [0, 0, 1, 1, 0], y: [-4, -4, 0, 0, 0] }}
+            transition=${{ duration: 5, times: [0, 0.62, 0.68, 0.9, 1], repeat: Infinity }}
+          >✓ 已复制到剪贴板</${motion.div}>
+        </${motion.div}>
+      </div>
+    `;
+  }
+
+  // 6s loop
+  function TaskDemo() {
+    return html`
+      <div className="anim-content">
+        <${Chat} name="张总" avatar="张" messages=${[
+          { role: 'other', text: '明天下午 3 点体检你来吗' },
+          { role: 'self',  text: '好' },
+        ]} />
+        <${motion.div}
+          className="spinner"
+          initial=${{ opacity: 0, rotate: 0 }}
+          animate=${{
+            opacity: [0, 0, 1, 1, 0],
+            rotate: [0, 0, 90, 540, 720],
+          }}
+          transition=${{ duration: 6, times: [0, 0.2, 0.22, 0.45, 0.5], repeat: Infinity, ease: 'linear' }}
+        />
+        <${motion.div}
+          className="bubble"
+          initial=${{ opacity: 1 }}
+          animate=${{ opacity: [1, 1, 0, 0, 0, 1] }}
+          transition=${{ duration: 6, times: [0, 0.2, 0.21, 0.92, 0.95, 1], repeat: Infinity }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="7" cy="7" r="2.6"/>
+            <circle cx="17" cy="17" r="2.6"/>
+            <path d="M18.5 4.5 5.5 19.5"/>
+          </svg>
+        </${motion.div}>
+        <${motion.div}
+          className="task-card"
+          initial=${{ opacity: 0, x: 30, scale: 0.95 }}
+          animate=${{ opacity: [0, 0, 1, 1, 1, 0], x: [30, 30, 0, 0, 0, 20] }}
+          transition=${{ duration: 6, times: [0, 0.45, 0.52, 0.92, 0.95, 1], repeat: Infinity }}
+        >
+          <div className="lbl">新任务 (detected)</div>
+          <div className="title">陪张总去体检</div>
+          <div className="when">2026-06-13 15:00</div>
+          <div className="actions">
+            <${motion.div}
+              className="btn btn-primary"
+              initial=${{ scale: 1 }}
+              animate=${{ scale: [1, 1, 0.9, 1.1, 1, 1, 1] }}
+              transition=${{ duration: 6, times: [0, 0.7, 0.75, 0.8, 0.85, 0.9, 1], repeat: Infinity }}
+            >Add to tasks</${motion.div}>
+            <div className="btn btn-secondary">Ignore</div>
+          </div>
+        </${motion.div}>
+      </div>
+    `;
+  }
+
+  // mount all 3 — they run independently in their own slide
+  createRoot(document.getElementById('anim-stage-1')).render(html`<${EnterDemo} />`);
+  createRoot(document.getElementById('anim-stage-2')).render(html`<${ReplyDemo} />`);
+  createRoot(document.getElementById('anim-stage-3')).render(html`<${TaskDemo} />`);
+</script>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let i = 0;
+
+  const nav = document.getElementById('nav');
+  for (let k = 0; k < total; k++) {
+    const b = document.createElement('button');
+    b.setAttribute('aria-label', `Slide ${k + 1}`);
+    b.addEventListener('click', () => go(k));
+    nav.appendChild(b);
+  }
+  const navBtns = nav.querySelectorAll('button');
+
+  const counter = document.getElementById('counter');
+  function render() {
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === i));
+    navBtns.forEach((b, idx) => b.classList.toggle('active', idx === i));
+    counter.textContent = `${String(i + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
+    document.title = `${i + 1}. ${slides[i].getAttribute('data-num').split(' / ')[1]} — Percent`;
+  }
+  function go(n) { i = Math.max(0, Math.min(total - 1, n)); render(); }
+  function next() { if (i < total - 1) { i++; render(); } }
+  function prev() { if (i > 0) { i--; render(); } }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') { go(0); }
+    else if (e.key === 'End') { go(total - 1); }
+  });
+
+  document.body.addEventListener('click', (e) => {
+    if (e.target.closest('.nav')) return;
+    next();
+  });
+
+  render();
+</script>
+</body>
+</html>

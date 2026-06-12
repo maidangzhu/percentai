@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Percent — 三个核心动作 · 自动播放演示</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-2: #111113;
+    --card: #16161a;
+    --border: rgba(255, 255, 255, 0.12);
+    --fg: #ffffff;
+    --fg-2: rgba(255, 255, 255, 0.88);
+    --fg-3: rgba(255, 255, 255, 0.65);
+    --other: #4f7cff;
+    --self: #2a2a2e;
+    --ok: #34d399;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Inter", sans-serif;
+    -webkit-font-smoothing: antialiased; padding: 56px 80px; }
+  .page { max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 44px; line-height: 1.1; letter-spacing: -0.02em; font-weight: 600;
+    margin-bottom: 12px; }
+  .lede { font-size: 18px; color: var(--fg-3); margin-bottom: 48px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+
+  /* demo card */
+  .demo { background: var(--card); border: 1px solid var(--border); border-radius: 18px;
+    padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .demo-label { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px;
+    border-radius: 999px; background: var(--bg-2); border: 1px solid var(--border);
+    font-size: 13px; color: var(--fg); font-weight: 500;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; align-self: flex-start; }
+  .demo-step { font-size: 14px; color: var(--fg-2); line-height: 1.5; min-height: 42px; }
+  .demo-step .muted { color: var(--fg-3); }
+
+  /* stage (the visual area where the animation plays) */
+  .stage { background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: 14px; aspect-ratio: 1; padding: 16px; position: relative;
+    overflow: hidden; display: flex; flex-direction: column; }
+
+  /* WeChat chat in the stage */
+  .chat { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .chat-hdr { display: flex; align-items: center; gap: 6px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .chat-hdr .av { width: 18px; height: 18px; border-radius: 50%;
+    background: var(--other); color: #fff; font-size: 10px; display: grid; place-items: center;
+    font-weight: 600; }
+  .chat-hdr .name { font-size: 12px; color: var(--fg); font-weight: 500; }
+  .chat-hdr .sub { font-size: 10px; color: var(--fg-3); margin-left: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .msg { display: flex; gap: 5px; align-items: flex-end; }
+  .msg.other { justify-content: flex-start; }
+  .msg.self { justify-content: flex-end; }
+  .msg .av-mini { width: 13px; height: 13px; border-radius: 3px; flex-shrink: 0;
+    font-size: 8px; display: grid; place-items: center; font-weight: 600; }
+  .msg.other .av-mini { background: var(--other); color: #fff; }
+  .msg.self .av-mini { background: var(--fg-3); color: var(--bg); }
+  .msg .b { max-width: 75%; padding: 5px 8px; border-radius: 8px; font-size: 11px;
+    line-height: 1.3; }
+  .msg.other .b { background: var(--card); color: var(--fg); border: 1px solid var(--border); }
+  .msg.self .b { background: var(--self); color: var(--fg); }
+
+  /* input box (only animation 1) */
+  .input-row { display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    margin-top: 6px; }
+  .input-row .text { flex: 1; font-size: 10px; color: var(--fg-3); }
+  .input-row .enter { width: 22px; height: 16px; border-radius: 3px;
+    background: var(--fg-3); color: var(--bg); font-size: 8px; display: grid;
+    place-items: center; font-weight: 700; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .input-row .enter.fresh { background: var(--fg); }
+
+  /* cursor (blinking) */
+  .cursor { display: inline-block; width: 1.5px; height: 11px; background: var(--fg);
+    vertical-align: middle; margin-left: 2px; }
+
+  /* enter key flash (animates in/out) */
+  .enter-flash { position: absolute; right: 16px; bottom: 18px; padding: 5px 10px;
+    background: var(--fg); color: var(--bg); border-radius: 6px; font-size: 11px;
+    font-weight: 700; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    box-shadow: 0 4px 16px rgba(255,255,255,0.2); pointer-events: none; }
+  .enter-flash .keycap { display: inline-block; padding: 0 6px; }
+
+  /* saved toast (animates in/out, bottom-right) */
+  .toast { position: absolute; right: 14px; bottom: 14px; padding: 6px 10px;
+    background: var(--ok); color: #000; border-radius: 6px; font-size: 11px;
+    font-weight: 600; display: flex; align-items: center; gap: 5px; pointer-events: none; }
+  .toast .check { display: grid; place-items: center; width: 12px; height: 12px;
+    border-radius: 50%; background: #000; color: var(--ok); font-size: 8px;
+    font-weight: 900; }
+
+  /* bubble (the floating % icon) */
+  .bubble { position: absolute; bottom: 14px; right: 14px; width: 30px; height: 30px;
+    background: var(--fg); border-radius: 50%; display: grid; place-items: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4); z-index: 5; }
+  .bubble svg { color: var(--bg); }
+
+  /* popover (reply card) */
+  .popover { position: absolute; right: 50px; bottom: 14px; width: 175px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 4; }
+  .popover .lbl { font-size: 9px; color: var(--fg-3); letter-spacing: 0.16em;
+    text-transform: uppercase; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .popover .txt { font-size: 11px; color: var(--fg); margin-top: 3px; line-height: 1.3; }
+  .popover .tabs { display: flex; gap: 3px; margin-top: 6px; }
+  .popover .tab { font-size: 9px; padding: 2px 5px; border-radius: 3px;
+    background: var(--bg-2); color: var(--fg-2); }
+  .popover .tab.on { background: var(--fg); color: var(--bg); }
+  .popover .copied { display: flex; align-items: center; gap: 4px; font-size: 9px;
+    color: var(--ok); margin-top: 6px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* task card */
+  .task-card { position: absolute; right: 50px; bottom: 14px; width: 195px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 4; }
+  .task-card .lbl { font-size: 9px; color: var(--fg-3); letter-spacing: 0.16em;
+    text-transform: uppercase; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .task-card .title { font-size: 12px; color: var(--fg); font-weight: 500; margin-top: 4px;
+    line-height: 1.3; }
+  .task-card .when { font-size: 10px; color: var(--fg-3); margin-top: 3px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .task-card .actions { display: flex; gap: 5px; margin-top: 8px; }
+  .task-card .btn { flex: 1; padding: 4px 0; border-radius: 4px; font-size: 10px;
+    font-weight: 600; text-align: center; }
+  .task-card .btn-primary { background: var(--fg); color: var(--bg); }
+  .task-card .btn-secondary { background: var(--bg-2); color: var(--fg-2);
+    border: 1px solid var(--border); }
+
+  /* spinner */
+  .spinner { position: absolute; right: 14px; bottom: 14px; width: 30px; height: 30px;
+    border: 2px solid var(--border); border-top-color: var(--fg); border-radius: 50%;
+    box-sizing: border-box; z-index: 5; }
+
+  /* helper */
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="module">
+  import htm from 'https://esm.sh/htm@3.1.1';
+  import React, { useState, useEffect } from 'https://esm.sh/react@18.3.1';
+  import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+  import { motion, AnimatePresence } from 'https://esm.sh/framer-motion@11.11.0';
+
+  const html = htm.bind(React.createElement);
+  const e = React.createElement;
+
+  // ---- shared: tiny chat component used in all 3 demos ----
+  function MiniChat({ name, avatar, messages }) {
+    return html`
+      <div className="chat">
+        <div className="chat-hdr">
+          <div className="av">${avatar}</div>
+          <div className="name">${name}</div>
+          <div className="sub">微信</div>
+        </div>
+        ${messages.map((m, i) => html`
+          <div key=${i} className=${'msg ' + m.role}>
+            ${m.role === 'other' ? html`<div className="av-mini">${avatar}</div>` : null}
+            <div className="b">${m.text}</div>
+            ${m.role === 'self' ? html`<div className="av-mini">我</div>` : null}
+          </div>
+        `)}
+      </div>
+    `;
+  }
+
+  // ============================================================
+  // Animation 1: 按 Enter 自动留痕 (loop = 4s)
+  // ============================================================
+  function EnterDemo() {
+    return html`
+      <div className="demo">
+        <div className="demo-label">/ 按 Enter 自动留痕</div>
+        <div className="stage">
+          <${MiniChat}
+            name="李雷"
+            avatar="L"
+            messages=${[
+              { role: 'other', text: '今晚吃啥?' },
+              { role: 'self',  text: '火锅?' },
+              { role: 'other', text: '好 我来订位' },
+            ]}
+          />
+          <div className="input-row">
+            <div className="text">
+              <span style=${{ color: 'var(--fg-2)' }}>说点什么...</span>
+              ${/* blinking cursor */ ''}
+              <${motion.span}
+                className="cursor"
+                animate=${{ opacity: [1, 1, 0, 0] }}
+                transition=${{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+              />
+            </div>
+            <${motion.div}
+              className="enter"
+              animate=${{
+                backgroundColor: ['rgba(255,255,255,0.65)', 'rgba(255,255,255,0.65)', 'rgb(255,255,255)', 'rgb(255,255,255)', 'rgba(255,255,255,0.65)'],
+                scale: [1, 1, 0.85, 1, 1],
+              }}
+              transition=${{ duration: 4, times: [0, 0.2, 0.27, 0.35, 0.45], repeat: Infinity }}
+            >⏎</${motion.div}>
+          </div>
+
+          ${/* enter key flash (briefly big) */ ''}
+          <${motion.div}
+            className="enter-flash"
+            initial=${{ opacity: 0, scale: 0.6 }}
+            animate=${{ opacity: [0, 0, 1, 1, 0], scale: [0.6, 0.6, 1.3, 1, 0.9] }}
+            transition=${{ duration: 4, times: [0, 0.22, 0.27, 0.4, 0.5], repeat: Infinity }}
+          ><span className="keycap">⏎</span> ENTER</${motion.div}>
+
+          ${/* saved toast (slides up, then disappears) */ ''}
+          <${motion.div}
+            className="toast"
+            initial=${{ opacity: 0, y: 12, scale: 0.9 }}
+            animate=${{ opacity: [0, 0, 1, 1, 0], y: [12, 12, 0, 0, -4] }}
+            transition=${{ duration: 4, times: [0, 0.3, 0.38, 0.85, 0.95], repeat: Infinity }}
+          >
+            <span className="check">✓</span>
+            <span>已存到本地</span>
+          </${motion.div}>
+        </div>
+        <div className="demo-step">
+          微信里打完字按 Enter,
+          <span className="muted"> 这条对话自动存到本地 SQLite, 不弹窗不打扰。</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // ============================================================
+  // Animation 2: 帮我回 (loop = 5s)
+  // ============================================================
+  function ReplyDemo() {
+    return html`
+      <div className="demo">
+        <div className="demo-label">/ 帮我回</div>
+        <div className="stage">
+          <${MiniChat}
+            name="李雷"
+            avatar="L"
+            messages=${[
+              { role: 'other', text: '今晚吃啥?' },
+              { role: 'self',  text: '火锅?' },
+              { role: 'other', text: '行 我来订位' },
+            ]}
+          />
+
+          ${/* bubble (pulse + then stay) */ ''}
+          <${motion.div}
+            className="bubble"
+            initial=${{ scale: 1 }}
+            animate=${{
+              scale: [1, 1.18, 1, 1, 1],
+              boxShadow: [
+                '0 4px 12px rgba(0,0,0,0.4)',
+                '0 0 0 6px rgba(255,255,255,0.35), 0 4px 12px rgba(0,0,0,0.4)',
+                '0 4px 12px rgba(0,0,0,0.4)',
+                '0 4px 12px rgba(0,0,0,0.4)',
+                '0 4px 12px rgba(0,0,0,0.4)',
+              ],
+            }}
+            transition=${{ duration: 5, times: [0, 0.18, 0.3, 0.95, 1], repeat: Infinity }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="7" cy="7" r="2.6"/>
+              <circle cx="17" cy="17" r="2.6"/>
+              <path d="M18.5 4.5 5.5 19.5"/>
+            </svg>
+          </${motion.div}>
+
+          ${/* popover (slides in from right) */ ''}
+          <${motion.div}
+            className="popover"
+            initial=${{ opacity: 0, x: 30, scale: 0.95 }}
+            animate=${{ opacity: [0, 0, 1, 1, 1, 0], x: [30, 30, 0, 0, 0, 20] }}
+            transition=${{ duration: 5, times: [0, 0.32, 0.4, 0.85, 0.92, 1], repeat: Infinity }}
+          >
+            <div className="lbl">回复 · recommend</div>
+            <div className="txt">行, 你定, 6:30 怎么样</div>
+            <div className="tabs">
+              <${motion.div}
+                className="tab on"
+                animate=${{ scale: [1, 1, 1.08, 1] }}
+                transition=${{ duration: 5, times: [0, 0.55, 0.62, 0.85], repeat: Infinity }}
+              >推荐</${motion.div}>
+              <div className="tab">沉稳</div>
+              <div className="tab">轻松</div>
+            </div>
+            <${motion.div}
+              className="copied"
+              initial=${{ opacity: 0, y: -4 }}
+              animate=${{ opacity: [0, 0, 1, 1, 0], y: [-4, -4, 0, 0, 0] }}
+              transition=${{ duration: 5, times: [0, 0.62, 0.68, 0.9, 1], repeat: Infinity }}
+            >✓ 已复制到剪贴板</${motion.div}>
+          </${motion.div}>
+        </div>
+        <div className="demo-step">
+          气泡 <span className="muted">→</span> 3 风格回复
+          <span className="muted"> → 默认复制 → ⌘V 发送 (永远不替你发)</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // ============================================================
+  // Animation 3: 记任务 (loop = 6s)
+  // ============================================================
+  function TaskDemo() {
+    return html`
+      <div className="demo">
+        <div className="demo-label">/ 记任务</div>
+        <div className="stage">
+          <${MiniChat}
+            name="李雷"
+            avatar="L"
+            messages=${[
+              { role: 'other', text: '明天下午 3 点体检你来吗' },
+              { role: 'self',  text: '好' },
+            ]}
+          />
+
+          ${/* spinner (shows while thinking) */ ''}
+          <${motion.div}
+            className="spinner"
+            initial=${{ opacity: 0, rotate: 0 }}
+            animate=${{
+              opacity: [0, 0, 1, 1, 0],
+              rotate: [0, 0, 90, 540, 720],
+            }}
+            transition=${{ duration: 6, times: [0, 0.2, 0.22, 0.45, 0.5], repeat: Infinity, ease: 'linear' }}
+          />
+
+          ${/* bubble (small, hidden when spinner / task-card show) */ ''}
+          <${motion.div}
+            className="bubble"
+            initial=${{ opacity: 1 }}
+            animate=${{ opacity: [1, 1, 0, 0, 0, 1] }}
+            transition=${{ duration: 6, times: [0, 0.2, 0.21, 0.92, 0.95, 1], repeat: Infinity }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="7" cy="7" r="2.6"/>
+              <circle cx="17" cy="17" r="2.6"/>
+              <path d="M18.5 4.5 5.5 19.5"/>
+            </svg>
+          </${motion.div}>
+
+          ${/* task card (slides in) */ ''}
+          <${motion.div}
+            className="task-card"
+            initial=${{ opacity: 0, x: 30, scale: 0.95 }}
+            animate=${{ opacity: [0, 0, 1, 1, 1, 0], x: [30, 30, 0, 0, 0, 20] }}
+            transition=${{ duration: 6, times: [0, 0.45, 0.52, 0.92, 0.95, 1], repeat: Infinity }}
+          >
+            <div className="lbl">新任务 (detected)</div>
+            <div className="title">陪李雷去体检</div>
+            <div className="when">2026-06-13 15:00</div>
+            <div className="actions">
+              <${motion.div}
+                className="btn btn-primary"
+                initial=${{ scale: 1 }}
+                animate=${{ scale: [1, 1, 0.9, 1.1, 1, 1, 1] }}
+                transition=${{ duration: 6, times: [0, 0.7, 0.75, 0.8, 0.85, 0.9, 1], repeat: Infinity }}
+              >Add to tasks</${motion.div}>
+              <div className="btn btn-secondary">Ignore</div>
+            </div>
+          </${motion.div}>
+        </div>
+        <div className="demo-step">
+          识别到隐性 todo
+          <span className="muted"> → 弹确认卡 → 点 Add 写本地 + 同步 Calendar</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function App() {
+    return html`
+      <div className="page">
+        <h1>三个核心动作 · 自动播放演示</h1>
+        <div className="lede">每个 demo 5–6s 循环跑. 跟 deck 同一个暗色主题, 可以直接截屏贴 PPT.</div>
+        <div className="grid">
+          <${EnterDemo} />
+          <${ReplyDemo} />
+          <${TaskDemo} />
+        </div>
+      </div>
+    `;
+  }
+
+  createRoot(document.getElementById('root')).render(html`<${App} />`);
+</script>
+</body>
+</html>
