@@ -125,8 +125,8 @@ model AgentSession {
 model AgentMessage {
   id         String       @id
   sessionId  String       @map("session_id")
-  role       String       // "user" | "assistant"
-  kind       String       // "message" | "reasoning" | "tool_call" | "tool_result" | "error"
+  role       String // "user" | "assistant"
+  kind       String // "message" | "reasoning" | "tool_call" | "tool_result" | "error"
   content    String       @default("")
   toolName   String?      @map("tool_name")
   toolInput  Json?        @map("tool_input")
