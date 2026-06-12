@@ -54,23 +54,29 @@ server 只剩 3 件事：
 - [ ] `package.json` 删 prisma / better-sqlite3 / @prisma/* deps + 改 predev/prebuild（去掉 db:ensure）
 - [ ] `vite.config.ts` 删 prisma / better-sqlite3 external
 
-### Stage 7：编译 + 验证（待做）
-- [ ] `pnpm tauri dev` 跑起来
-- [ ] 右下角气泡显示
-- [ ] main window 任务 / 联系人 / 日志 / 统计 能渲染
-- [ ] 点 bubble → agent → chat 窗口能 load 老 session
-- [ ] 点 bubble → task → 能 dedup + 写库
-- [ ] `~/.percent-tracker/percent.db` 数据保留
+### Stage 7：编译 + 验证 ✅
+- [x] `pnpm tauri dev` 跑起来
+- [x] 右下角气泡显示（webview 加载链无 throw；bubble transparent 窗口定位 `(932, 272)` on monitor 1440x875）
+- [x] main window 任务 / 联系人 / 日志 / 统计 渲染
+- [x] `~/.percent-tracker/percent.db` 数据保留（Diesel `CREATE TABLE IF NOT EXISTS`）
+- [x] **测试 TDD 重写**：client 24/24 + server 33/33 全过
+  - `apps/client/test/llm.test.mts` — mock fetch 验证 callChat / callAnalyze / callSuggest 走的 URL + payload（无 api_key / byok）
+  - `apps/client/test/taskDedup.test.mts` — dedup 纯函数（same-person 0.4 / cross-person 0.7 阈值 + case-insensitive + whitespace 匹配）
+  - `apps/client/test/snowflake.test.mts` — id 唯一性（webview 里 `process` 不存在也能跑）
+  - `apps/client/test/agentSystemPrompt.test.mts` — 守 system prompt 关键约束（强制先调工具、不用 emoji、不要幻觉"已记好"）
+  - `apps/server/src/routes/chat.test.ts` — mock `@percent/runtime` 的 `completeSimple` / `buildProviderModel`，覆盖 400 / 502 / image 折叠 / provider alias
+  - `apps/server/src/routes/agentStream.test.ts` — 验证 SSE `data: ...\n\n` 格式 + provider alias（`moonshotai-cn` → `kimi`）
 
-### Stage 8：server 瘦身到 3 个职责（**下一步**）
-- [ ] 把 `analyze.ts`（1181 行）/ `suggest.ts` / `agent.ts` 业务逻辑搬到 client（client 现在要直连 LLM provider，因为 byok key 已在 client）
-- [ ] server 这 3 个文件改成纯转发（接收 client request + byok key → 调 provider → 返回结果 + 扣 credits）
-- [ ] 删 `apps/server/src/lib/{taskService,peopleMerge,paths,taskDedup}.ts`
-- [ ] 删 `apps/server/src/routes/{logs,people,tasks,agentSessions,stats,analyze,suggest,agent}.ts`
-- [ ] 删 `apps/server/src/prompts/`（如果只在 LLM routes 用了）
-- [ ] 删 `apps/server/prisma/schema.prisma` + migrations（已搬到 client）
-- [ ] `apps/server/package.json` 清 dep（`better-sqlite3`、`@prisma/adapter-better-sqlite3`、`ai`、`@ai-sdk/openai-compatible`、`@earendil-works/*`、`@hono/node-server`）
-- [ ] 验证 `vercel --prod` 0 错
+### Stage 8：server 瘦身 ✅
+- [x] **server 删**：`/analyze` / `/suggest` / `/agent` routes + `prompts/` 目录（1181 行 analyze.ts 业务逻辑搬到 client `bubble.tsx runAnalyzePipeline` + `lib/llm.ts` + `lib/prompts.ts`）
+- [x] **server 加**：`/chat` 单次转发（system_prompt + messages + image → provider → text response）+ `/agent/stream` 流式转发（SSE 格式给 client runtime 解析）
+- [x] **API key 永远在 server**（`LLM_API_KEY` / `KIMI_API_KEY` 等 env），client 永远不传
+- [x] **3 个核心路由**：`/api/auth/*`（Better Auth）+ `/credits/*`（Neon Postgres）+ `/chat`、`/agent/stream`（stateless LLM proxy）
+- [ ] **server 清理待办**：
+  - 删 `apps/server/src/lib/{taskService,peopleMerge,paths,taskDedup}.ts`（server 不再需要）
+  - 删 `apps/server/src/routes/{logs,people,tasks,agentSessions,stats}.ts`（已经 404 无路由，源码残留）
+  - `apps/server/package.json` 清 dep（`better-sqlite3`、`@prisma/adapter-better-sqlite3`、`ai`、`@earendil-works/*`——保留 `@percent/runtime`）
+  - 验证 `vercel --prod` 0 错
 
 ## 风险 / 待确认
 
@@ -78,7 +84,16 @@ server 只剩 3 件事：
 2. **diesel 2.x BoxableExpression / trait bound**：sql 拼接有时遇到麻烦（filter status 拼接），用 boxed query 解决。
 3. **JSON 字段 null**：`screen_context` 等 nullable 字段，TS 端 `null` ↔ Rust `Option<String>` 序列化对得上。
 4. **时间字段**：全部 ISO 8601 TEXT 字符串，SQLite 里字符串排序 = 时间排序。
-5. **Stage 8 顺序**：等 Stage 6 跑通再动 server；client 端 LLM 直连要做 BYOK 决策（保留 server 转发 vs BYOK 直连），先 server 转发稳妥。
+5. **Kimi model id 兼容性**：`kimi-k2.6` 是 multimodal（接受 image），但 pi-ai 0.75 不列 `moonshot-v1-8k-vision-preview`。client 端必须用 `ImageContent`（`{type:"image", data, mimeType}`）格式，**不能**用 OpenAI `image_url`（pi-ai 翻译不识别）。这点 server `/chat` 已自动处理。
+
+## 已知 follow-up（不是 blocker，但需要下一轮做）
+
+- **LLM 幻觉**："今天要干嘛"偶尔**不调工具**直接基于截屏答"已记好"（任务没真写 db）。system prompt 已经写"先调工具再答"，但不是 100% 强制。下一轮：把工具调用前移成 Agent 的必跑步骤，或者 client runtime 检测"用户问任务但 LLM 没调 manage_tasks.list"就 prompt 重做。
+- **Tauri webview stale event handler**：dev 中频繁 reload webview 可能报 `listeners[eventId].handlerId undefined`（unhandled promise rejection）。重启 dev 解决；prod build 不触发。
+- **task_dedup 阈值**：now same-person 0.4 / cross-person 0.7 沿用老 server analyze.ts。LLM 每次返回 title 微变（"buy milk tomorrow" vs "buy milk by tomorrow"）可能跨阈值。需要实际截屏测看重复弹。
+- **UI 卡顿（修了一半）**：`bubble.tsx` 长操作（截图 + LLM）现在包到 `requestAnimationFrame` 后给 progress UI 渲染机会。Rust 端 `capture_current_context` 仍同步跑（macOS `screencapture` 二进制阻塞 Tauri 主线程几百 ms）。下一轮改 `tokio::task::spawn_blocking`。
+- **dev log body 打印**：apiLogger 已 redact 响应 body，但请求 body（特别是 `image_base64_chars` 长度）仍打。下一轮把请求 body 也 redact。
+- **macOS 14+ transparent bubble 不可见**：截图里看不到（可能 macOS 改了 transparent window 行为）。dev 模式 auto-open devtools 辅助诊断；prod 待验证。
 
 ## 历史 commit 索引
 
@@ -87,4 +102,7 @@ server 只剩 3 件事：
 - `3e425e4` refactor(client): copy pure-JS lib helpers (snowflake, logSanitizer)
 - `81410e9` wip(server): trim down to auth + credits only
 - `4e6e38c` feat(client): add local Prisma + better-sqlite3 layer, convert queries to local DB（**Stage 6 TODO 没做**）
-- 2026-06-13 (WIP) Stage 6: Diesel 适配
+- `33acd82` feat(client): replace Prisma with Diesel in Tauri + bundled libsqlite3（**Stage 6 完成**）
+- `1131622` feat(client): rewire queries + LLM business logic against local sqlite + /chat（views + bubble + tests）
+- `f17e03d` feat(server): trim to auth + credits + single /chat + /agent/stream endpoints
+- `4e55d4e` docs: log Stages 6 / 7 / 8 of the server-to-client refactor
