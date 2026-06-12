@@ -1,5 +1,6 @@
 {
   "buildCommand": "pnpm run build",
+  "installCommand": "pnpm install --ignore-workspace",
   "outputDirectory": "dist",
   "functions": {
     "dist/vercel.js": {
