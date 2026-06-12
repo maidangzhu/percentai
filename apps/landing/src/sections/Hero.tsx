@@ -1,5 +1,5 @@
 import { ArrowDownToLine, Github } from "../components/icons";
-import { LogFeed } from "../components/LogFeed";
+import { HeroDemo } from "../components/HeroDemo";
 
 export function Hero() {
   return (
@@ -28,17 +28,17 @@ export function Hero() {
           </div>
 
           <h1 className="text-display text-balance text-[44px] font-semibold leading-[1.05] sm:text-[68px]">
-            微信里按 <Kbd>Enter</Kbd>，
+            聊完天，
             <br />
             <span className="font-serif italic font-normal text-muted-foreground">
-              这条对话
+              任务
             </span>{" "}
-            就留下来了。
+            已经在日历上。
           </h1>
 
           <p className="max-w-xl text-pretty text-[17px] leading-relaxed text-muted-foreground">
-            Percent 是 macOS 上的微信 AI 伙伴。不切窗口、不截图按钮、不上传云。
-            替你记住聊过谁、聊了什么、答应过什么事。
+            本地 AI 读每条新消息，把对话里的承诺和任务自动捞出来，弹给你确认。
+            永远不上传，永远不替你做决定。
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -65,19 +65,11 @@ export function Hero() {
           </div>
         </div>
 
-        {/* The artifact — a slice of the real product surface */}
-        <div className="animate-fade-in-up mt-20 sm:mt-28" style={{ animationDelay: "0.3s" }}>
-          <LogFeed />
+        {/* The demo — chat on the left, tasks panel on the right */}
+        <div className="mt-20 sm:mt-24">
+          <HeroDemo />
         </div>
       </div>
     </section>
-  );
-}
-
-function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="relative -top-0.5 inline-flex h-[0.9em] min-w-[1.6em] items-center justify-center rounded-md border border-[color:var(--color-border)] bg-muted px-2 align-baseline font-mono text-[0.55em] font-medium tracking-tight text-foreground shadow-[0_1px_0_oklch(0_0_0_/_0.08),inset_0_-1px_0_oklch(0_0_0_/_0.05)]">
-      {children}
-    </kbd>
   );
 }
