@@ -1,6 +1,6 @@
 {
   "buildCommand": "pnpm run build",
-  "installCommand": "pnpm install --ignore-workspace",
+  "installCommand": "cp ../../pnpm-lock.yaml . && pnpm install --frozen-lockfile",
   "outputDirectory": "dist",
   "functions": {
     "dist/vercel.js": {
