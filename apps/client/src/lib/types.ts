@@ -1,4 +1,12 @@
-export const API_BASE = "http://localhost:3000";
+// API base URL
+//   dev:  defaults to http://localhost:3000 (the local Hono server in apps/server)
+//   prod: defaults to https://api.thepercentai.com
+// override with VITE_API_BASE_URL in apps/client/.env (gitignored)
+const DEFAULT_API_BASE = import.meta.env.PROD
+  ? "https://api.thepercentai.com"
+  : "http://localhost:3000";
+export const API_BASE: string =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEFAULT_API_BASE;
 export const AUTH_BASE = `${API_BASE}/api/auth`;
 
 // 官网地址 — Tauri 里用 shell.open 在系统浏览器打开
