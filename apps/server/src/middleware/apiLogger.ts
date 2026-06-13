@@ -11,6 +11,9 @@ function headersForLog(headers: Headers) {
 
 async function requestBodyForLog(request: Request, path: string) {
   if (path.startsWith("/api/auth/")) return undefined;
+  if (path === "/chat" || path.startsWith("/agent/")) {
+    return { skipped: true, reason: "llm_request_body" };
+  }
   const contentType = request.headers.get("content-type") ?? "";
   if (!["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) return undefined;
   if (!contentType.includes("application/json")) {
