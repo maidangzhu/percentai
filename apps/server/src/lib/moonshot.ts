@@ -121,10 +121,9 @@ export async function completeMoonshotKimi(input: {
       body: JSON.stringify({
         model: input.modelId,
         messages: buildMessages(input.systemPrompt, input.messages),
-        temperature: 1,
+        thinking: { type: "disabled" },
         max_tokens: input.maxTokens,
       }),
-      signal: AbortSignal.timeout(25_000),
     });
   } catch (error) {
     throw new Error(describeFetchError(error));
@@ -169,11 +168,9 @@ export function streamMoonshotKimi(input: {
             body: JSON.stringify({
               model: input.modelId,
               messages: buildMessages(input.systemPrompt, input.messages),
-              temperature: 1,
               max_tokens: input.maxTokens,
               stream: true,
             }),
-            signal: AbortSignal.timeout(25_000),
           });
         } catch (error) {
           throw new Error(describeFetchError(error));
