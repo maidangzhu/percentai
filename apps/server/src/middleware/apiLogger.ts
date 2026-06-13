@@ -9,7 +9,8 @@ function headersForLog(headers: Headers) {
   return output;
 }
 
-async function requestBodyForLog(request: Request) {
+async function requestBodyForLog(request: Request, path: string) {
+  if (path.startsWith("/api/auth/")) return undefined;
   const contentType = request.headers.get("content-type") ?? "";
   if (!["POST", "PATCH", "PUT", "DELETE"].includes(request.method)) return undefined;
   if (!contentType.includes("application/json")) {
@@ -69,7 +70,7 @@ export function apiLogger(): MiddlewareHandler {
 
     const url = new URL(c.req.url);
     const query = Object.fromEntries(url.searchParams.entries());
-    const requestBody = await requestBodyForLog(c.req.raw);
+    const requestBody = await requestBodyForLog(c.req.raw, c.req.path);
 
     logInfo("http.request", {
       trace_id: traceId,
@@ -103,4 +104,3 @@ export function apiLogger(): MiddlewareHandler {
     });
   };
 }
-
