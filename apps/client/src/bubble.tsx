@@ -93,6 +93,11 @@ type DedupSuppressedHandler = (existing: { title: string }) => void;
 const TASK_AUTO_CREATE_KEY = "percent.task.autoCreateOnCountdown";
 const REPLY_WRITE_CLIPBOARD_KEY = "percent.reply.writeToClipboard";
 
+function isTaskAutoCreateEnabled() {
+  if (typeof localStorage === "undefined") return true;
+  return localStorage.getItem(TASK_AUTO_CREATE_KEY) !== "false";
+}
+
 // 默认开 — 只有显式存了 "false" 才算关
 function isReplyWriteClipboardEnabled() {
   if (typeof localStorage === "undefined") return true;
@@ -483,10 +488,7 @@ export default function Bubble() {
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [autoCreateOnCountdown, setAutoCreateOnCountdown] = useState<boolean>(() => {
-    if (typeof localStorage === "undefined") return false;
-    return localStorage.getItem(TASK_AUTO_CREATE_KEY) === "true";
-  });
+  const [autoCreateOnCountdown, setAutoCreateOnCountdown] = useState<boolean>(() => isTaskAutoCreateEnabled());
   const [suggestionCopied, setSuggestionCopied] = useState(false);
 
   // 派生：进队列的 progress 决定 bubble 是不是 busy（之前是顶层 busyAction state）
@@ -767,7 +769,7 @@ export default function Bubble() {
   useEffect(() => {
     const sync = (event: StorageEvent) => {
       if (event.key !== TASK_AUTO_CREATE_KEY) return;
-      setAutoCreateOnCountdown(event.newValue === "true");
+      setAutoCreateOnCountdown(event.newValue !== "false");
     };
     window.addEventListener("storage", sync);
     return () => window.removeEventListener("storage", sync);

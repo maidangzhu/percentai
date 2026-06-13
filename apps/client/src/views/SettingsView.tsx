@@ -22,6 +22,7 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { isCalendarAutoAddEnabled } from "@/lib/calendar";
 import type { AuthUser, PermissionStatus, ShortcutConfig } from "@/lib/types";
 import { PROVIDER_PRESETS, type ProviderId } from "@percent/runtime";
 import {
@@ -124,9 +125,9 @@ function CaptureSection({
 }
 
 function CalendarSection() {
-  const [autoAdd, setAutoAdd] = useState(false);
+  const [autoAdd, setAutoAdd] = useState(true);
   useEffect(() => {
-    setAutoAdd(localStorage.getItem("percent.calendar.autoAdd") === "true");
+    setAutoAdd(isCalendarAutoAddEnabled());
   }, []);
   return (
     <SettingRow
@@ -184,9 +185,9 @@ function ReplySection() {
 }
 
 function TaskCaptureSection() {
-  const [autoCreate, setAutoCreate] = useState(false);
+  const [autoCreate, setAutoCreate] = useState(true);
   useEffect(() => {
-    setAutoCreate(localStorage.getItem("percent.task.autoCreateOnCountdown") === "true");
+    setAutoCreate(localStorage.getItem("percent.task.autoCreateOnCountdown") !== "false");
   }, []);
   return (
     <SettingRow

@@ -3,8 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 const CALENDAR_AUTO_ADD_KEY = "percent.calendar.autoAdd";
 
 export function isCalendarAutoAddEnabled() {
-  if (typeof localStorage === "undefined") return false;
-  return localStorage.getItem(CALENDAR_AUTO_ADD_KEY) === "true";
+  if (typeof localStorage === "undefined") return true;
+  return localStorage.getItem(CALENDAR_AUTO_ADD_KEY) !== "false";
 }
 
 export type CalendarAddResult = {
