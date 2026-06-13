@@ -116,6 +116,10 @@ export interface Stats {
   chat_turns: number;
   chat_messages: number;
   logs: number;
+  ai_interactions: number;
+  ai_reply_suggestions: number;
+  ai_task_detections: number;
+  ai_agent_messages: number;
 }
 
 // ── invoke wrappers ─────────────────────────────────────────────
@@ -204,6 +208,18 @@ export const db = {
       status: input.status ?? null,
     }),
   deleteTask: (id: string) => invoke<void>("db_delete_task", { id }),
+  recordAiEvent: (input: {
+    id: string;
+    eventType: "reply_suggestion" | "task_detection" | "task_created" | "agent_interaction";
+    refId?: string | null;
+    metadata?: unknown;
+  }) =>
+    invoke<void>("db_record_ai_event", {
+      id: input.id,
+      eventType: input.eventType,
+      refId: input.refId ?? null,
+      metadata: input.metadata ?? null,
+    }),
 
   // stats
   getStats: () => invoke<Stats>("db_get_stats"),

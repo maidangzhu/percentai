@@ -18,6 +18,7 @@ import {
 } from "@/bubble/popoverQueue";
 import { cn } from "@/lib/utils";
 import { createTaskWithCalendar } from "@/lib/tasks";
+import { recordAiEvent } from "@/lib/aiEvents";
 import { isExistingTaskCandidate, fetchPendingTasks } from "@/lib/taskDedup";
 import { listPeople } from "@/db/people";
 import { db } from "@/db/client";
@@ -624,6 +625,10 @@ export default function Bubble() {
           fingerprint: candidate.fingerprint ?? newSnowflakeId(),
         });
         calendarResult = created.calendar;
+        void recordAiEvent("task_created", {
+          refId: created.task.id,
+          metadata: { title: candidate.title, due_at: candidate.due_at },
+        });
       }
       // update 模式不重写 calendar
       if (calendarResult) {
@@ -1021,6 +1026,10 @@ export default function Bubble() {
         activeStyle: defaultStyle,
         personName: personNameResolved,
       });
+      void recordAiEvent("reply_suggestion", {
+        refId: logId,
+        metadata: { write_clipboard: writeClipboard },
+      });
     } catch (e) {
       logError("reply.error", { trace_id: traceId, error: serializeError(e) });
       showSuggestionPanel({
@@ -1043,6 +1052,7 @@ export default function Bubble() {
     // progress UI before we hit the screencapture path.
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     try {
+      void recordAiEvent("task_detection", { metadata: { source: "capture_task" } });
       const result = await captureAndAnalyze({ detectTask: true });
       if (!result) {
         logWarn("capture_task.no_capture", { trace_id: traceId });

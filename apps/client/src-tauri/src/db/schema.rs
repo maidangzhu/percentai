@@ -105,6 +105,16 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    ai_events (id) {
+        id -> Text,
+        event_type -> Text,
+        ref_id -> Nullable<Text>,
+        metadata -> Nullable<Text>,
+        created_at -> Text,
+    }
+}
+
 diesel::joinable!(chat_turns -> logs (log_id));
 diesel::joinable!(chat_turns -> people (person_id));
 diesel::joinable!(chat_messages -> chat_turns (turn_id));
@@ -121,4 +131,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     tasks,
     agent_sessions,
     agent_messages,
+    ai_events,
 );

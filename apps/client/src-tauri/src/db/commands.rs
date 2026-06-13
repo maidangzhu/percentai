@@ -138,6 +138,10 @@ pub struct Stats {
     pub chat_turns: i32,
     pub chat_messages: i32,
     pub logs: i32,
+    pub ai_interactions: i32,
+    pub ai_reply_suggestions: i32,
+    pub ai_task_detections: i32,
+    pub ai_agent_messages: i32,
 }
 
 // ── logs ────────────────────────────────────────────────────────
@@ -376,27 +380,26 @@ pub fn db_get_person(
     // to a single linear message list under the most recent turn (matches
     // the legacy `messages` shape the views expect).
     use crate::db::schema::chat_messages::dsl as M;
-    let messages: Vec<ChatMessageJson> = if let Some((turn_id, _, topic, captured_at)) =
-        turn_rows.first().cloned()
-    {
-        M::chat_messages
-            .filter(M::turn_id.eq(&turn_id))
-            .order(M::seq.asc())
-            .select((M::role, M::content, M::sender_name))
-            .load::<(String, String, Option<String>)>(&mut *conn)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|(role, content, sender_name)| ChatMessageJson {
-                role,
-                content,
-                captured_at: captured_at.clone(),
-                topic: topic.clone(),
-                sender_name,
-            })
-            .collect()
-    } else {
-        vec![]
-    };
+    let messages: Vec<ChatMessageJson> =
+        if let Some((turn_id, _, topic, captured_at)) = turn_rows.first().cloned() {
+            M::chat_messages
+                .filter(M::turn_id.eq(&turn_id))
+                .order(M::seq.asc())
+                .select((M::role, M::content, M::sender_name))
+                .load::<(String, String, Option<String>)>(&mut *conn)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|(role, content, sender_name)| ChatMessageJson {
+                    role,
+                    content,
+                    captured_at: captured_at.clone(),
+                    topic: topic.clone(),
+                    sender_name,
+                })
+                .collect()
+        } else {
+            vec![]
+        };
     let turns: Vec<ChatTurnJson> = turn_rows
         .into_iter()
         .map(|(turn_id, log_id, topic, captured_at)| ChatTurnJson {
@@ -498,17 +501,12 @@ pub fn db_list_tasks(
             q = q.filter(Ta::status.eq(s.clone()));
         }
     }
-    q = q
-        .order((Ta::status.asc(), Ta::due_at.asc()))
-        .limit(lim);
+    q = q.order((Ta::status.asc(), Ta::due_at.asc())).limit(lim);
     q.load::<TaskRow>(&mut *conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn db_get_task(
-    state: tauri::State<DbState>,
-    id: String,
-) -> Result<Option<TaskRow>, String> {
+pub fn db_get_task(state: tauri::State<DbState>, id: String) -> Result<Option<TaskRow>, String> {
     use crate::db::schema::tasks::dsl as Ta;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     Ta::tasks
@@ -642,6 +640,9 @@ pub fn db_delete_task(state: tauri::State<DbState>, id: String) -> Result<(), St
 
 #[tauri::command]
 pub fn db_get_stats(state: tauri::State<DbState>) -> Result<Stats, String> {
+    use crate::db::schema::agent_messages::dsl as AM;
+    use crate::db::schema::agent_sessions::dsl as AS;
+    use crate::db::schema::ai_events::dsl as E;
     use crate::db::schema::chat_messages::dsl as M;
     use crate::db::schema::chat_turns::dsl as T;
     use crate::db::schema::logs::dsl as L;
@@ -658,6 +659,26 @@ pub fn db_get_stats(state: tauri::State<DbState>) -> Result<Stats, String> {
     let turns: i64 = T::chat_turns.count().get_result(&mut *conn).unwrap_or(0);
     let messages: i64 = M::chat_messages.count().get_result(&mut *conn).unwrap_or(0);
     let logs: i64 = L::logs.count().get_result(&mut *conn).unwrap_or(0);
+    let event_count = |kind: &str, conn: &mut SqliteConnection| -> i64 {
+        E::ai_events
+            .filter(E::event_type.eq(kind))
+            .count()
+            .get_result(conn)
+            .unwrap_or(0)
+    };
+    let reply_events = event_count("reply_suggestion", &mut *conn);
+    let task_detection_events = event_count("task_detection", &mut *conn);
+    let agent_interaction_events = event_count("agent_interaction", &mut *conn);
+    let agent_assistant_messages: i64 = AM::agent_messages
+        .filter(AM::role.eq("assistant"))
+        .count()
+        .get_result(&mut *conn)
+        .unwrap_or(0);
+    let agent_sessions: i64 = AS::agent_sessions
+        .count()
+        .get_result(&mut *conn)
+        .unwrap_or(0);
+    let ai_interactions = logs + reply_events + task_detection_events + agent_interaction_events;
     Ok(Stats {
         tasks_total: total as i32,
         tasks_pending: pending as i32,
@@ -666,7 +687,42 @@ pub fn db_get_stats(state: tauri::State<DbState>) -> Result<Stats, String> {
         chat_turns: turns as i32,
         chat_messages: messages as i32,
         logs: logs as i32,
+        ai_interactions: ai_interactions as i32,
+        ai_reply_suggestions: reply_events as i32,
+        ai_task_detections: if task_detection_events > 0 {
+            task_detection_events as i32
+        } else {
+            total as i32
+        },
+        ai_agent_messages: if agent_assistant_messages > 0 {
+            agent_assistant_messages as i32
+        } else {
+            agent_sessions as i32
+        },
     })
+}
+
+#[tauri::command]
+pub fn db_record_ai_event(
+    state: tauri::State<DbState>,
+    id: String,
+    event_type: String,
+    ref_id: Option<String>,
+    metadata: Option<serde_json::Value>,
+) -> Result<(), String> {
+    use crate::db::schema::ai_events::dsl as E;
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let metadata_text = metadata.map(|value| value.to_string());
+    diesel::insert_or_ignore_into(E::ai_events)
+        .values((
+            E::id.eq(id),
+            E::event_type.eq(event_type),
+            E::ref_id.eq(ref_id),
+            E::metadata.eq(metadata_text),
+        ))
+        .execute(&mut *conn)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ── agent_sessions ──────────────────────────────────────────────
@@ -774,7 +830,18 @@ pub fn db_get_agent_session(
         .map_err(|e| e.to_string())?
         .into_iter()
         .map(
-            |(id, role, kind, content, tool_name, tool_input, tool_result, is_error, seq, created_at)| {
+            |(
+                id,
+                role,
+                kind,
+                content,
+                tool_name,
+                tool_input,
+                tool_result,
+                is_error,
+                seq,
+                created_at,
+            )| {
                 AgentMessageJson {
                     id,
                     role,
@@ -835,10 +902,7 @@ pub fn db_create_agent_session(
 }
 
 #[tauri::command]
-pub fn db_delete_agent_session(
-    state: tauri::State<DbState>,
-    id: String,
-) -> Result<(), String> {
+pub fn db_delete_agent_session(state: tauri::State<DbState>, id: String) -> Result<(), String> {
     use crate::db::schema::agent_sessions::dsl as S;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     diesel::delete(S::agent_sessions.filter(S::id.eq(&id)))
@@ -1100,8 +1164,8 @@ pub fn db_purge_all_logs(state: tauri::State<DbState>) -> Result<usize, String> 
 
 #[tauri::command]
 pub fn db_purge_all_people(state: tauri::State<DbState>) -> Result<usize, String> {
-    use crate::db::schema::chat_turns::dsl as T;
     use crate::db::schema::chat_messages::dsl as M;
+    use crate::db::schema::chat_turns::dsl as T;
     use crate::db::schema::people::dsl as P;
     use crate::db::schema::tasks::dsl as Ta;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;

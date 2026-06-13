@@ -1,19 +1,19 @@
+use chrono::Local;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, RwLock};
-use chrono::Local;
-use serde::Serialize;
 use tauri::{Emitter, Manager, Wry};
 
+mod ax_capture;
+mod db;
+mod frontapp;
 mod keyboard;
 mod logger;
-mod frontapp;
-mod window;
-mod screenshotter;
 mod permissions;
-mod ax_capture;
+mod screenshotter;
 mod shell_tools;
-mod db;
+mod window;
 
 use keyboard::{start_keyboard_listener, ShortcutConfig};
 use logger::LogStore;
@@ -105,10 +105,8 @@ fn activate_app(window: &tauri::WebviewWindow) {
             let _: () = msg_send![ns_win as *mut NSObject, makeKeyAndOrderFront: nil];
 
             // 换个思路：用 NSRunningApplication
-            let running_app_cls: *mut NSObject = msg_send![
-                class_ref("NSRunningApplication"),
-                currentApplication
-            ];
+            let running_app_cls: *mut NSObject =
+                msg_send![class_ref("NSRunningApplication"), currentApplication];
             let opts: u64 = 1 << 0; // NSApplicationActivateIgnoringOtherApps
             let _: bool = msg_send![running_app_cls, activateWithOptions: opts];
         }
@@ -141,7 +139,10 @@ fn get_shortcut_config(state: tauri::State<AppState>) -> ShortcutConfig {
 }
 
 #[tauri::command]
-fn set_shortcut_config(shortcut: ShortcutConfig, state: tauri::State<AppState>) -> Result<ShortcutConfig, String> {
+fn set_shortcut_config(
+    shortcut: ShortcutConfig,
+    state: tauri::State<AppState>,
+) -> Result<ShortcutConfig, String> {
     shortcut.validate()?;
     save_shortcut_config(&state.log_dir, &shortcut)?;
     if let Ok(mut current) = state.shortcut.write() {
@@ -264,12 +265,28 @@ fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as usize;
-        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
+        let b1 = if chunk.len() > 1 {
+            chunk[1] as usize
+        } else {
+            0
+        };
+        let b2 = if chunk.len() > 2 {
+            chunk[2] as usize
+        } else {
+            0
+        };
         out.push(CHARS[(b0 >> 2) & 0x3F] as char);
         out.push(CHARS[((b0 << 4) | (b1 >> 4)) & 0x3F] as char);
-        out.push(if chunk.len() > 1 { CHARS[((b1 << 2) | (b2 >> 6)) & 0x3F] as char } else { '=' });
-        out.push(if chunk.len() > 2 { CHARS[b2 & 0x3F] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            CHARS[((b1 << 2) | (b2 >> 6)) & 0x3F] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            CHARS[b2 & 0x3F] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -356,9 +373,7 @@ fn paste_clipboard_to_frontmost(app: tauri::AppHandle<Wry>) -> Result<(), String
 
     let output = Command::new("osascript")
         .arg("-e")
-        .arg(
-            r#"tell application "System Events" to keystroke "v" using {command down}"#,
-        )
+        .arg(r#"tell application "System Events" to keystroke "v" using {command down}"#)
         .output()
         .map_err(|e| format!("osascript exec: {}", e))?;
 
@@ -502,7 +517,9 @@ fn read_png_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 加载项目根目录的 .env 文件（开发时有效；打包后不依赖此文件）
-    let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new("."));
+    let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     let _ = dotenvy::from_path(project_root.join(".env"));
 
     tauri::Builder::default()
@@ -556,6 +573,7 @@ pub fn run() {
             db::commands::db_create_task,
             db::commands::db_update_task,
             db::commands::db_delete_task,
+            db::commands::db_record_ai_event,
             db::commands::db_get_stats,
             db::commands::db_list_agent_sessions,
             db::commands::db_get_agent_session,
@@ -580,7 +598,10 @@ pub fn run() {
             // 初始化本地 SQLite (Diesel)
             let db_state = db::init();
             app.manage(db_state);
-            eprintln!("[db] local sqlite initialized at {}", db::commands::db_get_db_path());
+            eprintln!(
+                "[db] local sqlite initialized at {}",
+                db::commands::db_get_db_path()
+            );
 
             setup_windows(app);
             start_keyboard_listener(app.handle().clone());

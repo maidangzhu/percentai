@@ -19,6 +19,7 @@ import {
 } from "@/bubble/agentRuntime";
 import type { AgentMessage, AgentSessionSummary } from "@/bubble/ChatPanel";
 import { logInfo, logError, newTraceId as logNewTraceId } from "@/lib/logger";
+import { recordAiEvent } from "@/lib/aiEvents";
 import {
   listAgentSessions,
   getAgentSession,
@@ -561,6 +562,10 @@ export function useChatWindow(): UseChatWindowResult {
             })
           );
           logInfo("agent.prompt.done", { trace_id: traceId, session_id: sessionId });
+          void recordAiEvent("agent_interaction", {
+            refId: sessionId,
+            metadata: { trace_id: traceId },
+          });
         } finally {
           unsubscribe();
         }

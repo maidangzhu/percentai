@@ -111,3 +111,12 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_agent_messages_session_seq ON agent_messages (session_id, seq);
+
+CREATE TABLE IF NOT EXISTS ai_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  ref_id TEXT,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ai_events_type_created ON ai_events (event_type, created_at DESC);
