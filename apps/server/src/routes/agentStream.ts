@@ -39,7 +39,7 @@ const proxyBodySchema = z.object({
   options: z.object({
     temperature: z.number().optional(),
     maxTokens: z.number().optional(),
-    reasoning: z.union([z.string(), z.number()]).optional(),
+    reasoning: z.union([z.boolean(), z.string(), z.number()]).optional(),
     sessionId: z.string().optional(),
     apiKey: z.string().optional(),
     signal: z.unknown().optional(),
@@ -190,6 +190,7 @@ app.post("/model/stream", async (c) => {
       systemPrompt: context.systemPrompt ?? undefined,
       messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
       maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
+      thinking: options.reasoning ? { type: "enabled" } : undefined,
       fallback: fallback
         ? {
             apiKey: fallback.apiKey,

@@ -29,7 +29,7 @@ type OpenAICompatibleInput = {
   systemPrompt?: string;
   messages: MoonshotMessage[];
   maxTokens: number;
-  thinking?: { type: "disabled" };
+  thinking?: { type: "enabled" | "disabled" };
 };
 
 type OpenAICompatibleStreamInput = OpenAICompatibleInput & {
@@ -168,7 +168,12 @@ export async function completeMoonshotKimi(input: Omit<OpenAICompatibleInput, "t
 async function writeOpenAICompatibleStream(
   input: OpenAICompatibleInput,
   write: (obj: PercentProxyEvent) => void,
-  state: { started: boolean; usage: AssistantMessage["usage"] },
+  state: {
+    textStarted: boolean;
+    thinkingStarted: boolean;
+    thinkingEnded: boolean;
+    usage: AssistantMessage["usage"];
+  },
 ) {
   let response: Response;
   try {
@@ -202,14 +207,29 @@ async function writeOpenAICompatibleStream(
       const data = trimmed.slice(6);
       if (!data || data === "[DONE]") continue;
       const chunk = JSON.parse(data) as {
-        choices?: Array<{ delta?: { content?: string }; finish_reason?: string }>;
+        choices?: Array<{
+          delta?: { content?: string; reasoning_content?: string };
+          finish_reason?: string;
+        }>;
         usage?: ChatCompletionResponse["usage"];
       };
+      const reasoningDelta = chunk.choices?.[0]?.delta?.reasoning_content ?? "";
+      if (reasoningDelta) {
+        if (!state.thinkingStarted) {
+          write({ type: "thinking_start", contentIndex: 0 });
+          state.thinkingStarted = true;
+        }
+        write({ type: "thinking_delta", contentIndex: 0, delta: reasoningDelta });
+      }
       const delta = chunk.choices?.[0]?.delta?.content ?? "";
       if (delta) {
-        if (!state.started) {
+        if (state.thinkingStarted && !state.thinkingEnded) {
+          write({ type: "thinking_end", contentIndex: 0 });
+          state.thinkingEnded = true;
+        }
+        if (!state.textStarted) {
           write({ type: "text_start", contentIndex: 0 });
-          state.started = true;
+          state.textStarted = true;
         }
         write({ type: "text_delta", contentIndex: 0, delta });
       }
@@ -224,14 +244,19 @@ export function streamOpenAICompatible(input: OpenAICompatibleStreamInput) {
       const enc = new TextEncoder();
       const write = (obj: PercentProxyEvent) =>
         controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
-      const state = { usage: { ...emptyUsage }, started: false };
+      const state = {
+        usage: { ...emptyUsage },
+        textStarted: false,
+        thinkingStarted: false,
+        thinkingEnded: false,
+      };
       try {
         write({ type: "start" });
         try {
           await writeOpenAICompatibleStream(input, write, state);
         } catch (primaryError) {
           if (!input.fallback) throw primaryError;
-          if (state.started) throw primaryError;
+          if (state.textStarted || state.thinkingStarted) throw primaryError;
           input.onPrimaryError?.(primaryError);
           try {
             await writeOpenAICompatibleStream(input.fallback, write, state);
@@ -240,7 +265,10 @@ export function streamOpenAICompatible(input: OpenAICompatibleStreamInput) {
             throw fallbackError;
           }
         }
-        if (state.started) write({ type: "text_end", contentIndex: 0 });
+        if (state.thinkingStarted && !state.thinkingEnded) {
+          write({ type: "thinking_end", contentIndex: 0 });
+        }
+        if (state.textStarted) write({ type: "text_end", contentIndex: 0 });
         write({ type: "done", reason: "stop", usage: state.usage });
       } catch (error) {
         write({

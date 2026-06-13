@@ -123,3 +123,54 @@ test("streamOpenAICompatible falls back without exposing a stream error", async 
     fetchMock.mock.restore();
   }
 });
+
+test("streamOpenAICompatible converts reasoning_content into thinking events", async () => {
+  const fetchMock = mock.method(globalThis, "fetch", async () =>
+    new Response(
+      [
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\" more\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n",
+        "data: [DONE]\n\n",
+      ].join(""),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    )
+  );
+
+  try {
+    const stream = streamOpenAICompatible({
+      apiKey: "sk",
+      baseUrl: "https://api.moonshot.cn/v1",
+      modelId: "kimi-k2.6",
+      messages: [{ role: "user", content: "hello" }],
+      maxTokens: 128,
+      thinking: { type: "enabled" },
+    });
+
+    const text = await new Response(stream).text();
+    const events = text
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)) as { type: string; delta?: string });
+
+    assert.deepEqual(
+      events.map((event) => event.type),
+      [
+        "start",
+        "thinking_start",
+        "thinking_delta",
+        "thinking_delta",
+        "thinking_end",
+        "text_start",
+        "text_delta",
+        "text_end",
+        "done",
+      ],
+    );
+    assert.equal(events[2].delta, "think");
+    assert.equal(events[3].delta, " more");
+    assert.equal(events[6].delta, "answer");
+  } finally {
+    fetchMock.mock.restore();
+  }
+});
