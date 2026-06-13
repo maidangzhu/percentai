@@ -94,7 +94,7 @@ function normalizeMoonshotPayload(payload: unknown, wantsThinking: boolean): unk
   if ("thinking" in next || wantsThinking) {
     next.thinking = { type: wantsThinking ? "enabled" : "disabled" };
   }
-  next.temperature = wantsThinking ? 1 : 0.6;
+  next.temperature = 1;
   return next;
 }
 

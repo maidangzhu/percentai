@@ -61,7 +61,7 @@ function providerOptions(provider: string) {
   if (provider === "kimi") {
     // Kimi K2.6 rejects arbitrary temperatures for the production key, and
     // uncapped reasoning can run past Vercel's function timeout.
-    options.temperature = 0.6;
+    options.temperature = 1;
   }
   return options;
 }

@@ -29,13 +29,13 @@ const proxyBodySchema = z.object({
     id: z.string(),
     provider: z.string(),
     api: z.string(),
-    baseUrl: z.string().optional(),
-  }),
+    baseUrl: z.string().nullish(),
+  }).passthrough(),
   context: z.object({
-    systemPrompt: z.string().optional(),
+    systemPrompt: z.string().nullish(),
     messages: z.array(z.any()),
     tools: z.array(z.any()).optional(),
-  }),
+  }).passthrough(),
   options: z.object({
     temperature: z.number().optional(),
     maxTokens: z.number().optional(),
@@ -43,7 +43,7 @@ const proxyBodySchema = z.object({
     sessionId: z.string().optional(),
     apiKey: z.string().optional(),
     signal: z.unknown().optional(),
-    headers: z.record(z.string(), z.string()).optional(),
+    headers: z.record(z.string(), z.unknown()).optional(),
   }).passthrough(),
 });
 
@@ -125,6 +125,10 @@ app.post("/model/stream", async (c) => {
   const raw = await c.req.json().catch(() => null);
   const parsed = proxyBodySchema.safeParse(raw);
   if (!parsed.success) {
+    logError("agent_stream.invalid_request", {
+      trace_id: traceId,
+      issues: parsed.error.issues,
+    });
     return c.json(
       { code: 400, message: "invalid request", data: { issues: parsed.error.issues } },
       400,
@@ -168,12 +172,13 @@ app.post("/model/stream", async (c) => {
     return c.json({ code: 400, message: `unknown provider: ${provider}` }, 400);
   }
 
-  if (isMoonshotKimi(provider, m.id, m.baseUrl)) {
+  const baseUrl = m.baseUrl ?? "https://api.moonshot.cn/v1";
+  if (isMoonshotKimi(provider, m.id, baseUrl)) {
     const body = streamMoonshotKimi({
       apiKey,
-      baseUrl: m.baseUrl ?? "https://api.moonshot.cn/v1",
+      baseUrl,
       modelId: m.id,
-      systemPrompt: context.systemPrompt,
+      systemPrompt: context.systemPrompt ?? undefined,
       messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
       maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
     });
@@ -193,7 +198,7 @@ app.post("/model/stream", async (c) => {
     ...(options as SimpleStreamOptions),
     apiKey,
     maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
-    temperature: options.temperature ?? (isKimiProvider(provider) ? 0.6 : undefined),
+    temperature: options.temperature ?? (isKimiProvider(provider) ? 1 : undefined),
   };
   const stream = streamSimple(modelObj, context as Context, streamOptions);
 
