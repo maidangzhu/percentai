@@ -31,6 +31,24 @@ const emptyUsage: AssistantMessage["usage"] = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
+export function describeFetchError(error: unknown) {
+  if (!(error instanceof Error)) return String(error);
+  const cause = error.cause as
+    | (Error & { code?: string; errno?: string; syscall?: string; hostname?: string })
+    | undefined;
+  const details = [
+    error.name,
+    error.message,
+    cause?.name ? `cause_name=${cause.name}` : "",
+    cause?.message ? `cause_message=${cause.message}` : "",
+    cause?.code ? `code=${cause.code}` : "",
+    cause?.errno ? `errno=${cause.errno}` : "",
+    cause?.syscall ? `syscall=${cause.syscall}` : "",
+    cause?.hostname ? `hostname=${cause.hostname}` : "",
+  ].filter(Boolean);
+  return details.join(" ");
+}
+
 function toUsage(usage: ChatCompletionResponse["usage"]): AssistantMessage["usage"] {
   return {
     ...emptyUsage,
@@ -92,20 +110,25 @@ export async function completeMoonshotKimi(input: {
   messages: MoonshotMessage[];
   maxTokens: number;
 }) {
-  const response = await fetch(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${input.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: input.modelId,
-      messages: buildMessages(input.systemPrompt, input.messages),
-      temperature: 1,
-      max_tokens: input.maxTokens,
-    }),
-    signal: AbortSignal.timeout(25_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: input.modelId,
+        messages: buildMessages(input.systemPrompt, input.messages),
+        temperature: 1,
+        max_tokens: input.maxTokens,
+      }),
+      signal: AbortSignal.timeout(25_000),
+    });
+  } catch (error) {
+    throw new Error(describeFetchError(error));
+  }
   const text = await response.text();
   const body = JSON.parse(text) as ChatCompletionResponse;
   if (!response.ok) {
@@ -135,21 +158,26 @@ export function streamMoonshotKimi(input: {
       let started = false;
       try {
         write({ type: "start" });
-        const response = await fetch(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${input.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: input.modelId,
-            messages: buildMessages(input.systemPrompt, input.messages),
-            temperature: 1,
-            max_tokens: input.maxTokens,
-            stream: true,
-          }),
-          signal: AbortSignal.timeout(25_000),
-        });
+        let response: Response;
+        try {
+          response = await fetch(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${input.apiKey}`,
+            },
+            body: JSON.stringify({
+              model: input.modelId,
+              messages: buildMessages(input.systemPrompt, input.messages),
+              temperature: 1,
+              max_tokens: input.maxTokens,
+              stream: true,
+            }),
+            signal: AbortSignal.timeout(25_000),
+          });
+        } catch (error) {
+          throw new Error(describeFetchError(error));
+        }
         if (!response.ok || !response.body) {
           const text = await response.text();
           throw new Error(text.slice(0, 500));
