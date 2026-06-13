@@ -11,6 +11,7 @@ import { mock } from "node:test";
 // Captured mock state — picked up by the mock impl below.
 let nextEvents: Array<Record<string, unknown>> = [];
 let streamShouldThrow: Error | null = null;
+let lastStreamContext: unknown = null;
 
 mock.module("@percent/runtime", {
   namedExports: {
@@ -25,7 +26,8 @@ mock.module("@percent/runtime", {
         api: "openai-completions",
       };
     },
-    streamSimple: async function* () {
+    streamSimple: async function* (_model: unknown, context: unknown) {
+      lastStreamContext = context;
       if (streamShouldThrow) throw streamShouldThrow;
       for (const ev of nextEvents) {
         yield ev;
@@ -47,6 +49,7 @@ const { agentStreamRouter } = await import("../routes/agentStream.js");
 function reset() {
   nextEvents = [];
   streamShouldThrow = null;
+  lastStreamContext = null;
   delete process.env.LLM_API_KEY;
   delete process.env.KIMI_API_KEY;
 }
@@ -128,6 +131,50 @@ test("streams each event as a Server-Sent Event line (data: ...\\n\\n)", async (
   assert.equal(JSON.parse(dataLines[0].slice(6)).type, "start");
   assert.equal(JSON.parse(dataLines[1].slice(6)).delta, "hello");
   assert.equal(JSON.parse(dataLines[3].slice(6)).type, "done");
+});
+
+test("passes agent tools through to the provider stream", async () => {
+  reset();
+  process.env.LLM_API_KEY = "sk";
+  nextEvents = [
+    { type: "toolcall_start", contentIndex: 0, id: "call-1", toolName: "manage_chats" },
+    { type: "toolcall_delta", contentIndex: 0, delta: "{\"action\":\"list\"" },
+    { type: "toolcall_delta", contentIndex: 0, delta: ",\"person_name\":\"烽宁\"}" },
+    { type: "toolcall_end", contentIndex: 0 },
+    { type: "done", reason: "toolUse", message: { usage: null } },
+  ];
+  const tools = [
+    {
+      name: "manage_chats",
+      description: "Read local chat messages.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string" },
+          person_name: { type: "string" },
+        },
+        required: ["action"],
+      },
+    },
+  ];
+  const res = await postStream({
+    model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
+    context: { messages: [], tools },
+    options: {},
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual((lastStreamContext as { tools?: unknown[] }).tools, tools);
+
+  const text = await res.text();
+  const events = text
+    .split("\n")
+    .filter((l) => l.startsWith("data: "))
+    .map((l) => JSON.parse(l.slice(6)) as { type: string; toolName?: string; delta?: string });
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_end", "done"],
+  );
+  assert.equal(events[0].toolName, "manage_chats");
 });
 
 test("emits a single error event when the provider stream throws", async () => {

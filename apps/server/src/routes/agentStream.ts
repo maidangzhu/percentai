@@ -31,6 +31,7 @@ const proxyBodySchema = z.object({
   context: z.object({
     systemPrompt: z.string().optional(),
     messages: z.array(z.any()),
+    tools: z.array(z.any()).optional(),
   }),
   options: z.object({
     temperature: z.number().optional(),
