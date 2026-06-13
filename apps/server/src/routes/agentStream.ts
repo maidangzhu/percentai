@@ -189,6 +189,7 @@ app.post("/model/stream", async (c) => {
       modelId: m.id,
       systemPrompt: context.systemPrompt ?? undefined,
       messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
+      tools: context.tools,
       maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
       thinking: options.reasoning ? { type: "enabled" } : undefined,
       fallback: fallback
@@ -198,6 +199,7 @@ app.post("/model/stream", async (c) => {
             modelId: fallback.modelId,
             systemPrompt: context.systemPrompt ?? undefined,
             messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
+            tools: context.tools,
             maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
           }
         : undefined,

@@ -174,3 +174,54 @@ test("streamOpenAICompatible converts reasoning_content into thinking events", a
     fetchMock.mock.restore();
   }
 });
+
+test("streamOpenAICompatible converts tool_calls into toolcall events", async () => {
+  let requestBody: Record<string, unknown> | null = null;
+  const fetchMock = mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(
+      [
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"manage_chats\",\"arguments\":\"{\\\"action\\\":\\\"list\\\"\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\",\\\"person_name\\\":\\\"APF4\\\"}\"}}]}}]}\n\n",
+        "data: [DONE]\n\n",
+      ].join(""),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  });
+
+  try {
+    const stream = streamOpenAICompatible({
+      apiKey: "sk",
+      baseUrl: "https://api.moonshot.cn/v1",
+      modelId: "kimi-k2.6",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "manage_chats",
+          description: "Read chats.",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      maxTokens: 128,
+    });
+
+    const text = await new Response(stream).text();
+    const events = text
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)) as { type: string; delta?: string; toolName?: string });
+
+    assert.ok(requestBody);
+    assert.equal(Array.isArray((requestBody as { tools?: unknown[] }).tools), true);
+    assert.equal((requestBody as { tool_choice?: string }).tool_choice, "auto");
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["start", "toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_end", "done"],
+    );
+    assert.equal(events[1].toolName, "manage_chats");
+    assert.equal(events[2].delta, "{\"action\":\"list\"");
+    assert.equal(events[3].delta, ",\"person_name\":\"APF4\"}");
+  } finally {
+    fetchMock.mock.restore();
+  }
+});

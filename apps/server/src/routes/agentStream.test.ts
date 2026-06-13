@@ -336,3 +336,46 @@ test("enables Kimi thinking for ask-screen native stream when reasoning is reque
     process.env.NODE_ENV = "test";
   }
 });
+
+test("passes agent tools into native Kimi stream requests", async () => {
+  reset();
+  process.env.NODE_ENV = "production";
+  process.env.MOONSHOT_NATIVE_PROXY = "1";
+  process.env.KIMI_API_KEY = "sk-kimi";
+  let requestBody: Record<string, unknown> | null = null;
+  const fetchMock = mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response("data: [DONE]\n\n", {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  });
+
+  try {
+    const res = await postStream({
+      model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
+      context: {
+        messages: [{ role: "user", content: "hi" }],
+        tools: [
+          {
+            name: "manage_chats",
+            description: "Read chats.",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+      },
+      options: { reasoning: true },
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+    assert.ok(requestBody);
+    const tools = (requestBody as { tools?: Array<{ type?: string; function?: { name?: string } }> }).tools;
+    assert.equal(tools?.[0]?.type, "function");
+    assert.equal(tools?.[0]?.function?.name, "manage_chats");
+    assert.equal((requestBody as { tool_choice?: string }).tool_choice, "auto");
+  } finally {
+    fetchMock.mock.restore();
+    delete process.env.MOONSHOT_NATIVE_PROXY;
+    process.env.NODE_ENV = "test";
+  }
+});

@@ -28,6 +28,7 @@ type OpenAICompatibleInput = {
   modelId: string;
   systemPrompt?: string;
   messages: MoonshotMessage[];
+  tools?: unknown[];
   maxTokens: number;
   thinking?: { type: "enabled" | "disabled" };
 };
@@ -36,6 +37,22 @@ type OpenAICompatibleStreamInput = OpenAICompatibleInput & {
   fallback?: OpenAICompatibleInput;
   onPrimaryError?: (error: unknown) => void;
   onFallbackError?: (error: unknown) => void;
+};
+
+type OpenAICompatibleStreamState = {
+  textStarted: boolean;
+  textContentIndex?: number;
+  thinkingStarted: boolean;
+  thinkingEnded: boolean;
+  thinkingContentIndex?: number;
+  nextContentIndex: number;
+  toolCalls: Map<number, {
+    id: string;
+    name: string;
+    contentIndex: number;
+    ended: boolean;
+  }>;
+  usage: AssistantMessage["usage"];
 };
 
 const emptyUsage: AssistantMessage["usage"] = {
@@ -107,10 +124,33 @@ function completionsUrl(baseUrl: string) {
   return `${baseUrl.replace(/\/$/, "")}/chat/completions`;
 }
 
+function toOpenAITool(tool: unknown) {
+  if (!tool || typeof tool !== "object") return null;
+  const value = tool as Record<string, unknown>;
+  if (value.type === "function" && value.function && typeof value.function === "object") {
+    return value;
+  }
+  const name = typeof value.name === "string" ? value.name : "";
+  if (!name) return null;
+  return {
+    type: "function",
+    function: {
+      name,
+      description: typeof value.description === "string" ? value.description : "",
+      parameters:
+        value.parameters && typeof value.parameters === "object"
+          ? value.parameters
+          : { type: "object", properties: {} },
+    },
+  };
+}
+
 function buildChatBody(input: OpenAICompatibleInput, stream = false) {
+  const tools = (input.tools ?? []).map(toOpenAITool).filter(Boolean);
   return {
     model: input.modelId,
     messages: buildMessages(input.systemPrompt, input.messages),
+    ...(tools.length ? { tools, tool_choice: "auto" } : {}),
     ...(input.thinking ? { thinking: input.thinking } : {}),
     max_tokens: input.maxTokens,
     ...(stream ? { stream: true } : {}),
@@ -168,12 +208,7 @@ export async function completeMoonshotKimi(input: Omit<OpenAICompatibleInput, "t
 async function writeOpenAICompatibleStream(
   input: OpenAICompatibleInput,
   write: (obj: PercentProxyEvent) => void,
-  state: {
-    textStarted: boolean;
-    thinkingStarted: boolean;
-    thinkingEnded: boolean;
-    usage: AssistantMessage["usage"];
-  },
+  state: OpenAICompatibleStreamState,
 ) {
   let response: Response;
   try {
@@ -208,30 +243,71 @@ async function writeOpenAICompatibleStream(
       if (!data || data === "[DONE]") continue;
       const chunk = JSON.parse(data) as {
         choices?: Array<{
-          delta?: { content?: string; reasoning_content?: string };
+          delta?: {
+            content?: string;
+            reasoning_content?: string;
+            tool_calls?: Array<{
+              index?: number;
+              id?: string;
+              type?: string;
+              function?: { name?: string; arguments?: string };
+            }>;
+          };
           finish_reason?: string;
         }>;
         usage?: ChatCompletionResponse["usage"];
       };
-      const reasoningDelta = chunk.choices?.[0]?.delta?.reasoning_content ?? "";
+      const choice = chunk.choices?.[0];
+      const reasoningDelta = choice?.delta?.reasoning_content ?? "";
       if (reasoningDelta) {
         if (!state.thinkingStarted) {
-          write({ type: "thinking_start", contentIndex: 0 });
+          state.thinkingContentIndex = state.nextContentIndex++;
+          write({ type: "thinking_start", contentIndex: state.thinkingContentIndex });
           state.thinkingStarted = true;
         }
-        write({ type: "thinking_delta", contentIndex: 0, delta: reasoningDelta });
+        write({ type: "thinking_delta", contentIndex: state.thinkingContentIndex ?? 0, delta: reasoningDelta });
       }
-      const delta = chunk.choices?.[0]?.delta?.content ?? "";
+      for (const toolDelta of choice?.delta?.tool_calls ?? []) {
+        const toolIndex = Number(toolDelta.index ?? 0);
+        let toolCall = state.toolCalls.get(toolIndex);
+        if (!toolCall) {
+          toolCall = {
+            id: toolDelta.id ?? `tool_${toolIndex}`,
+            name: toolDelta.function?.name ?? "",
+            contentIndex: state.nextContentIndex++,
+            ended: false,
+          };
+          state.toolCalls.set(toolIndex, toolCall);
+          write({
+            type: "toolcall_start",
+            contentIndex: toolCall.contentIndex,
+            id: toolCall.id,
+            toolName: toolCall.name || "unknown",
+          });
+        } else if (!toolCall.name && toolDelta.function?.name) {
+          toolCall.name = toolDelta.function.name;
+        }
+        const argumentsDelta = toolDelta.function?.arguments ?? "";
+        if (argumentsDelta) {
+          write({
+            type: "toolcall_delta",
+            contentIndex: toolCall.contentIndex,
+            delta: argumentsDelta,
+          });
+        }
+      }
+      const delta = choice?.delta?.content ?? "";
       if (delta) {
         if (state.thinkingStarted && !state.thinkingEnded) {
-          write({ type: "thinking_end", contentIndex: 0 });
+          write({ type: "thinking_end", contentIndex: state.thinkingContentIndex ?? 0 });
           state.thinkingEnded = true;
         }
         if (!state.textStarted) {
-          write({ type: "text_start", contentIndex: 0 });
+          state.textContentIndex = state.nextContentIndex++;
+          write({ type: "text_start", contentIndex: state.textContentIndex });
           state.textStarted = true;
         }
-        write({ type: "text_delta", contentIndex: 0, delta });
+        write({ type: "text_delta", contentIndex: state.textContentIndex ?? 0, delta });
       }
       if (chunk.usage) Object.assign(state.usage, toUsage(chunk.usage));
     }
@@ -244,11 +320,13 @@ export function streamOpenAICompatible(input: OpenAICompatibleStreamInput) {
       const enc = new TextEncoder();
       const write = (obj: PercentProxyEvent) =>
         controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
-      const state = {
+      const state: OpenAICompatibleStreamState = {
         usage: { ...emptyUsage },
         textStarted: false,
         thinkingStarted: false,
         thinkingEnded: false,
+        nextContentIndex: 0,
+        toolCalls: new Map(),
       };
       try {
         write({ type: "start" });
@@ -266,10 +344,18 @@ export function streamOpenAICompatible(input: OpenAICompatibleStreamInput) {
           }
         }
         if (state.thinkingStarted && !state.thinkingEnded) {
-          write({ type: "thinking_end", contentIndex: 0 });
+          write({ type: "thinking_end", contentIndex: state.thinkingContentIndex ?? 0 });
         }
-        if (state.textStarted) write({ type: "text_end", contentIndex: 0 });
-        write({ type: "done", reason: "stop", usage: state.usage });
+        if (state.textStarted) write({ type: "text_end", contentIndex: state.textContentIndex ?? 0 });
+        let usedTools = false;
+        for (const toolCall of state.toolCalls.values()) {
+          usedTools = true;
+          if (!toolCall.ended) {
+            write({ type: "toolcall_end", contentIndex: toolCall.contentIndex });
+            toolCall.ended = true;
+          }
+        }
+        write({ type: "done", reason: usedTools ? "toolUse" : "stop", usage: state.usage });
       } catch (error) {
         write({
           type: "error",
