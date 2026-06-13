@@ -1,10 +1,12 @@
 const AUTH_TOKEN_KEY = "percent.auth.token";
 
 export function getAuthToken() {
+  if (typeof localStorage === "undefined") return null;
   return localStorage.getItem(AUTH_TOKEN_KEY);
 }
 
 export function setAuthToken(token: string | null | undefined) {
+  if (typeof localStorage === "undefined") return;
   if (token) {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
   } else {

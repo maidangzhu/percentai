@@ -69,9 +69,15 @@ function buildMessages(systemPrompt: string | undefined, messages: MoonshotMessa
   ];
 }
 
-export function isMoonshotKimi(provider: string, modelId: string, baseUrl = "https://api.moonshot.cn/v1") {
+export function isMoonshotKimi(
+  provider: string,
+  modelId: string,
+  baseUrl = "https://api.moonshot.cn/v1",
+  requireNativeProxyGate = true,
+) {
   return (
-    (process.env.VERCEL === "1" || process.env.MOONSHOT_NATIVE_PROXY === "1") &&
+    process.env.NODE_ENV !== "test" &&
+    (!requireNativeProxyGate || process.env.VERCEL === "1" || process.env.MOONSHOT_NATIVE_PROXY === "1") &&
     (provider === "kimi" || provider === "moonshotai-cn" || provider === "moonshotai") &&
     modelId.startsWith("kimi-") &&
     baseUrl.includes("api.moonshot.cn")

@@ -9,20 +9,20 @@ import test from "node:test";
 const mod = await import("../src/bubble/agentRuntime.ts");
 const prompt: string = mod.SCREEN_AGENT_SYSTEM_PROMPT;
 
-test("names the six tools the agent should mount", () => {
+test("names the enabled tools the agent should mount", () => {
   for (const tool of [
     "manage_people",
     "manage_chats",
     "manage_tasks",
     "manage_logs",
-    "run_bash",
-    "read_file",
   ]) {
     assert.ok(
       prompt.includes(tool),
       `system prompt must mention tool: ${tool}`,
     );
   }
+  assert.equal(prompt.includes("run_bash"), false, "run_bash should stay disabled");
+  assert.equal(prompt.includes("read_file"), false, "read_file should stay disabled");
 });
 
 test("instructs the agent to call tools before answering about tasks / contacts / chats", () => {
@@ -47,10 +47,6 @@ test("instructs list-before-get so the agent doesn't dump everything into the pr
   );
 });
 
-test("instructs bash is dangerous and should not be auto-run for state-changing commands", () => {
-  // The original prompt was explicit about rm -rf / kill -9 / curl | sh / sudo.
-  // If a future edit drops this guard, the agent could wreck the
-  // user's Mac.
-  assert.ok(/rm -rf|kill -9|curl \|\| sh|sudo/.test(prompt), "prompt must list forbidden bash patterns");
-  assert.ok(/bash/.test(prompt), "prompt must call out bash as a dangerous tool");
+test("states shell and file tools are currently disabled", () => {
+  assert.ok(/不能执行 shell|不能直接读取本地文件/.test(prompt), "prompt must state high-risk tools are disabled");
 });
