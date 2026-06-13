@@ -11,6 +11,7 @@
 // prompts and message shapes.
 
 import { API_BASE } from "@/lib/types";
+import { authFetch } from "@/lib/auth";
 import {
   SCREENSHOT_ANALYZE_SYSTEM_PROMPT,
   SUGGEST_TRIO_SYSTEM_PROMPT,
@@ -34,9 +35,8 @@ export interface ChatMessage {
 // ── raw transport ───────────────────────────────────────────────
 
 async function post<T>(url: string, body: unknown): Promise<T> {
-  const resp = await fetch(url, {
+  const resp = await authFetch(url, {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });

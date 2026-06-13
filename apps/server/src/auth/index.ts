@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { bearer } from "better-auth/plugins";
 import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { authPrisma } from "./db.js";
 
@@ -25,6 +26,7 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 8,
   },
+  plugins: [bearer()],
   advanced: {
     useSecureCookies: isProduction,
     defaultCookieAttributes: isProduction

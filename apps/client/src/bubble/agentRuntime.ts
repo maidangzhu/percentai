@@ -8,6 +8,7 @@ import {
   type Message as RuntimeMessage,
 } from "@percent/runtime";
 import { API_BASE, type TaskRow } from "@/lib/types";
+import { getAuthToken } from "@/lib/auth";
 import { listPeople, getPerson } from "@/db/people";
 import { listLogs } from "@/db/logs";
 import { db } from "@/db/client";
@@ -149,6 +150,7 @@ export async function createAgentForRequest(
 ): Promise<RuntimeAgent> {
   return createPercentAgent({
     apiBase: API_BASE,
+    authToken: getAuthToken() ?? undefined,
     sessionId: options.sessionId,
     systemPrompt: SCREEN_AGENT_SYSTEM_PROMPT,
     tools: createPercentTools(options.toolsOptions),

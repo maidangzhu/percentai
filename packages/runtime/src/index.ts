@@ -129,6 +129,7 @@ type PercentProxySerializableOptions = Pick<
 export interface PercentProxyStreamOptions extends PercentProxySerializableOptions {
   signal?: AbortSignal;
   proxyUrl: string;
+  authToken?: string;
 }
 
 class PercentProxyMessageEventStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -192,10 +193,15 @@ export function streamPercentProxy(
     options.signal?.addEventListener("abort", abortHandler);
 
     try {
+      const headers = new Headers({ "Content-Type": "application/json" });
+      if (options.authToken) {
+        headers.set("Authorization", `Bearer ${options.authToken}`);
+      }
+
       const response = await fetch(`${options.proxyUrl}/agent/model/stream`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           model,
           context,
@@ -355,6 +361,7 @@ export interface CreatePercentAgentOptions {
    */
   mode?: "proxy" | "direct";
   byokApiKey?: string;
+  authToken?: string;
 }
 
 export function createPercentAgent(options: CreatePercentAgentOptions): Agent {
@@ -371,6 +378,7 @@ export function createPercentAgent(options: CreatePercentAgentOptions): Agent {
           streamPercentProxy(proxyModel, context, {
             ...streamOptions,
             proxyUrl: options.apiBase,
+            authToken: options.authToken,
           })) as StreamFn;
   return new Agent({
     initialState: {

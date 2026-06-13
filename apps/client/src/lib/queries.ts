@@ -11,6 +11,7 @@ import {
   type LogRow as DomainLogRow,
   type TaskRow,
 } from "@/lib/types";
+import { authFetch } from "@/lib/auth";
 import { newSnowflakeId } from "@/lib/snowflake";
 
 /* ── Query keys ─────────────────────────────────────────────── */
@@ -26,7 +27,7 @@ export const queryKeys = {
 /* ── Cloud fetchers (auth + credits only) ──────────────────── */
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const resp = await fetch(url, { credentials: "include" });
+  const resp = await authFetch(url);
   if (!resp.ok) throw new Error(`GET ${url} failed: ${resp.status}`);
   const json = (await resp.json()) as ApiResponse<T>;
   if (!json.data) throw new Error(`GET ${url} returned no data`);

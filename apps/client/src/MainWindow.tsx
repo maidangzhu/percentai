@@ -13,6 +13,7 @@ import { AuthView } from "@/views/AuthView";
 import { WelcomeView } from "@/views/WelcomeView";
 import { LoadingView } from "@/views/LoadingView";
 import { AUTH_BASE } from "@/lib/types";
+import { authFetch, setAuthToken } from "@/lib/auth";
 import {
   useLogs,
   usePeople,
@@ -107,7 +108,7 @@ export default function MainWindow() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${AUTH_BASE}/get-session`, { credentials: "include" })
+    authFetch(`${AUTH_BASE}/get-session`)
       .then(async (resp) => {
         if (!resp.ok) {
           const body = await resp.json().catch(() => null);
@@ -171,10 +172,11 @@ export default function MainWindow() {
 
   const handleSignOut = async () => {
     try {
-      await fetch(`${AUTH_BASE}/sign-out`, { method: "POST", credentials: "include" });
+      await authFetch(`${AUTH_BASE}/sign-out`, { method: "POST" });
     } catch (e) {
       console.error("[auth] sign out failed:", e);
     } finally {
+      setAuthToken(null);
       setAuthUser(null);
       setActiveKey("home");
     }

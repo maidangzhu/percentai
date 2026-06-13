@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AUTH_BASE } from "@/lib/types";
+import { authFetch, rememberAuthTokenFromResponse } from "@/lib/auth";
 import type { AuthUser } from "@/lib/types";
 
 export function AuthView({
@@ -39,9 +40,8 @@ export function AuthView({
     setBusy(true);
     setMessage("");
     try {
-      const resp = await fetch(`${AUTH_BASE}/${mode === "login" ? "sign-in/email" : "sign-up/email"}`, {
+      const resp = await authFetch(`${AUTH_BASE}/${mode === "login" ? "sign-in/email" : "sign-up/email"}`, {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           mode === "login"
@@ -53,12 +53,13 @@ export function AuthView({
       if (!resp.ok) {
         throw new Error(body?.message ?? "Request failed. Please try again.");
       }
+      rememberAuthTokenFromResponse(resp, body);
       const user = body?.user as AuthUser | undefined;
       if (user) {
         onAuthenticated(user);
         return;
       }
-      const sessionResp = await fetch(`${AUTH_BASE}/get-session`, { credentials: "include" });
+      const sessionResp = await authFetch(`${AUTH_BASE}/get-session`);
       const session = (await sessionResp.json().catch(() => null)) as { user?: AuthUser } | null;
       if (!session?.user) throw new Error("Signed in, but no session was returned.");
       onAuthenticated(session.user);
