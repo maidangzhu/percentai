@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { cors } from "hono/cors";
 import { getRequestListener } from "@hono/node-server";
 
@@ -13,6 +14,21 @@ import { creditsRouter } from "./routes/credits.js";
 type AppAuth = Parameters<typeof authGuard>[0] & {
   handler: (request: Request) => Response | Promise<Response>;
 };
+
+async function toBufferedRequest(c: Context) {
+  const raw = c.req.raw;
+  const init: RequestInit & { duplex?: "half" } = {
+    method: raw.method,
+    headers: raw.headers,
+  };
+
+  if (raw.method !== "GET" && raw.method !== "HEAD") {
+    init.body = await raw.arrayBuffer();
+    init.duplex = "half";
+  }
+
+  return new Request(raw.url, init);
+}
 
 const allowedOrigins = new Set([
   "http://localhost:1420",
@@ -39,7 +55,7 @@ export function createApp(auth: AppAuth) {
     })
   );
   app.use("*", apiLogger());
-  app.all("/api/auth/*", (c) => auth.handler(c.req.raw));
+  app.all("/api/auth/*", async (c) => auth.handler(await toBufferedRequest(c)));
   app.use("*", responseGateway());
   app.use("*", authGuard(auth));
 
