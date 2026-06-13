@@ -265,6 +265,7 @@ export function useChatWindow(): UseChatWindowResult {
       });
 
       const stagedMessages = new Map<string, AgentMessage>();
+      const toolCallMessageIds = new Map<string, string>();
       let streamItemCounter = 0;
       const nextItemId = (kind: AgentMessage["kind"]) =>
         `${runId}-${kind}-${++streamItemCounter}`;
@@ -308,6 +309,14 @@ export function useChatWindow(): UseChatWindowResult {
           ...existing,
           content: (existing.content ?? "") + delta,
         });
+      };
+
+      const getToolCallMessageId = (toolCallId: string) => {
+        const existing = toolCallMessageIds.get(toolCallId);
+        if (existing) return existing;
+        const id = nextItemId("tool_call");
+        toolCallMessageIds.set(toolCallId, id);
+        return id;
       };
 
       try {
@@ -413,6 +422,45 @@ export function useChatWindow(): UseChatWindowResult {
                   update.delta,
                 );
               }
+            } else if (update.type === "toolcall_start") {
+              const toolCall = update.partial.content[update.contentIndex];
+              if (toolCall?.type === "toolCall") {
+                logInfo("agent.event.toolcall_start", {
+                  trace_id: eventTraceId,
+                  run_id: runId,
+                  tool_call_id: toolCall.id,
+                  tool_name: toolCall.name,
+                });
+                upsertStagedMessage({
+                  id: getToolCallMessageId(toolCall.id),
+                  role: "assistant",
+                  kind: "tool_call",
+                  content: `准备调用 ${toolCall.name}`,
+                  toolName: toolCall.name,
+                  toolResult: toolCall.arguments,
+                });
+              }
+            } else if (update.type === "toolcall_delta") {
+              const toolCall = update.partial.content[update.contentIndex];
+              if (toolCall?.type === "toolCall") {
+                upsertStagedMessage({
+                  id: getToolCallMessageId(toolCall.id),
+                  role: "assistant",
+                  kind: "tool_call",
+                  content: `准备调用 ${toolCall.name}`,
+                  toolName: toolCall.name,
+                  toolResult: toolCall.arguments,
+                });
+              }
+            } else if (update.type === "toolcall_end") {
+              upsertStagedMessage({
+                id: getToolCallMessageId(update.toolCall.id),
+                role: "assistant",
+                kind: "tool_call",
+                content: `调用 ${update.toolCall.name}`,
+                toolName: update.toolCall.name,
+                toolResult: update.toolCall.arguments,
+              });
             }
             return;
           }
@@ -426,7 +474,7 @@ export function useChatWindow(): UseChatWindowResult {
               args_chars: JSON.stringify(event.args ?? {}).length,
             });
             upsertStagedMessage({
-              id: nextItemId("tool_call"),
+              id: getToolCallMessageId(event.toolCallId),
               role: "assistant",
               kind: "tool_call",
               content: `调用 ${event.toolName}`,
@@ -448,7 +496,7 @@ export function useChatWindow(): UseChatWindowResult {
               result_chars: resultText.length,
             });
             upsertStagedMessage({
-              id: nextItemId("tool_result"),
+              id: getToolCallMessageId(event.toolCallId),
               role: "assistant",
               kind: "tool_result",
               content: event.isError ? `${event.toolName} 失败` : `${event.toolName} 完成`,
