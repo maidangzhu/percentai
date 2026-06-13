@@ -16,6 +16,7 @@ import {
   type TextContent,
 } from "@percent/runtime";
 import { elapsedMs, logError, logInfo } from "../lib/appLogger.js";
+import { completeMoonshotKimi, isMoonshotKimi, type MoonshotMessage } from "../lib/moonshot.js";
 
 // UserMessage.content is `string | (TextContent | ImageContent)[]`. We
 // can't import UserMessage directly (runtime re-exports only the union
@@ -158,6 +159,26 @@ app.post("/", async (c) => {
 
   let text: string;
   try {
+    if (isMoonshotKimi(body.provider, modelId, baseUrl)) {
+      const result = await completeMoonshotKimi({
+        apiKey,
+        baseUrl,
+        modelId,
+        systemPrompt: body.system_prompt,
+        messages: messages as MoonshotMessage[],
+        maxTokens: DEFAULT_LLM_MAX_TOKENS,
+      });
+      text = result.text;
+      logInfo("chat.ok", {
+        trace_id: traceId,
+        provider: body.provider,
+        model_id: modelId,
+        duration_ms: elapsedMs(startedAt),
+        output_chars: text.length,
+      });
+      return c.json({ code: 200, message: "ok", data: { text } });
+    }
+
     const options = providerOptions(body.provider);
     options.apiKey = apiKey;
     const result = await completeSimple(

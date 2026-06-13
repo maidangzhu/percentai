@@ -19,6 +19,7 @@ import {
   type SimpleStreamOptions,
 } from "@percent/runtime";
 import { elapsedMs, logError, logInfo } from "../lib/appLogger.js";
+import { isMoonshotKimi, streamMoonshotKimi, type MoonshotMessage } from "../lib/moonshot.js";
 
 // The `model` field coming over the wire carries enough for the server
 // to re-build the model via `buildProviderModel` (provider, modelId,
@@ -165,6 +166,23 @@ app.post("/model/stream", async (c) => {
     });
   } catch {
     return c.json({ code: 400, message: `unknown provider: ${provider}` }, 400);
+  }
+
+  if (isMoonshotKimi(provider, m.id, m.baseUrl)) {
+    const body = streamMoonshotKimi({
+      apiKey,
+      baseUrl: m.baseUrl ?? "https://api.moonshot.cn/v1",
+      modelId: m.id,
+      systemPrompt: context.systemPrompt,
+      messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
+      maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
+    });
+    return new Response(body, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
+    });
   }
 
   // streamSimple(model, context, options) returns pi-ai's raw
