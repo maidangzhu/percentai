@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, History, Plus, X, Send, Sparkles, Wrench, CheckCircle2, AlertCircle, Loader2, MessageSquare, Pencil, FastForward } from "lucide-react";
@@ -87,13 +87,31 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const composingRef = useRef(false);
-  const internalMessagesRef = useRef<HTMLDivElement | null>(null);
-  const scrollRef = messagesRef ?? internalMessagesRef;
+  const internalViewportRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = messagesRef ?? internalViewportRef;
+
+  const scrollToBottom = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [viewportRef]);
+
+  useLayoutEffect(() => {
+    scrollToBottom();
+    const raf = requestAnimationFrame(scrollToBottom);
+    return () => cancelAnimationFrame(raf);
+  }, [messages, loading, pendingApproval, scrollToBottom]);
 
   useEffect(() => {
-    const list = scrollRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [messages, loading, scrollRef]);
+    const content = contentRef.current;
+    if (!content) return;
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(scrollToBottom);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
 
   const handleSubmit = () => {
     const text = input.trim();
@@ -232,8 +250,8 @@ export function ChatPanel({
       </div>
       )}
 
-      <ScrollArea className="min-w-0 flex-1 min-h-[150px]">
-        <div ref={scrollRef} className="flex min-w-0 max-w-full flex-col gap-2 overflow-x-hidden px-3 py-1">
+      <ScrollArea className="min-w-0 flex-1 min-h-[150px]" viewportRef={viewportRef}>
+        <div ref={contentRef} className="flex min-w-0 max-w-full flex-col gap-2 overflow-x-hidden px-3 py-1">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
               <div className="grid h-8 w-8 place-items-center rounded-full border border-dashed border-white/15 text-white/40">
