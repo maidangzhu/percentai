@@ -17,3 +17,14 @@ test
 test_*
 .turbo
 .vercel
+.git
+.next
+.next/**
+target
+target/**
+**/target
+**/target/**
+coverage
+coverage/**
+**/coverage
+**/coverage/**
