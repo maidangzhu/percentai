@@ -22,6 +22,22 @@ type ChatCompletionResponse = {
   error?: { message?: string };
 };
 
+type OpenAICompatibleInput = {
+  apiKey: string;
+  baseUrl: string;
+  modelId: string;
+  systemPrompt?: string;
+  messages: MoonshotMessage[];
+  maxTokens: number;
+  thinking?: { type: "disabled" };
+};
+
+type OpenAICompatibleStreamInput = OpenAICompatibleInput & {
+  fallback?: OpenAICompatibleInput;
+  onPrimaryError?: (error: unknown) => void;
+  onFallbackError?: (error: unknown) => void;
+};
+
 const emptyUsage: AssistantMessage["usage"] = {
   input: 0,
   output: 0,
@@ -87,6 +103,20 @@ function buildMessages(systemPrompt: string | undefined, messages: MoonshotMessa
   ];
 }
 
+function completionsUrl(baseUrl: string) {
+  return `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+}
+
+function buildChatBody(input: OpenAICompatibleInput, stream = false) {
+  return {
+    model: input.modelId,
+    messages: buildMessages(input.systemPrompt, input.messages),
+    ...(input.thinking ? { thinking: input.thinking } : {}),
+    max_tokens: input.maxTokens,
+    ...(stream ? { stream: true } : {}),
+  };
+}
+
 export function isMoonshotKimi(
   provider: string,
   modelId: string,
@@ -102,28 +132,16 @@ export function isMoonshotKimi(
   );
 }
 
-export async function completeMoonshotKimi(input: {
-  apiKey: string;
-  baseUrl: string;
-  modelId: string;
-  systemPrompt?: string;
-  messages: MoonshotMessage[];
-  maxTokens: number;
-}) {
+export async function completeOpenAICompatible(input: OpenAICompatibleInput) {
   let response: Response;
   try {
-    response = await fetch(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    response = await fetch(completionsUrl(input.baseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${input.apiKey}`,
       },
-      body: JSON.stringify({
-        model: input.modelId,
-        messages: buildMessages(input.systemPrompt, input.messages),
-        thinking: { type: "disabled" },
-        max_tokens: input.maxTokens,
-      }),
+      body: JSON.stringify(buildChatBody(input)),
     });
   } catch (error) {
     throw new Error(describeFetchError(error));
@@ -140,86 +158,104 @@ export async function completeMoonshotKimi(input: {
   };
 }
 
-export function streamMoonshotKimi(input: {
-  apiKey: string;
-  baseUrl: string;
-  modelId: string;
-  systemPrompt?: string;
-  messages: MoonshotMessage[];
-  maxTokens: number;
-}) {
+export async function completeMoonshotKimi(input: Omit<OpenAICompatibleInput, "thinking">) {
+  return completeOpenAICompatible({
+    ...input,
+    thinking: { type: "disabled" },
+  });
+}
+
+async function writeOpenAICompatibleStream(
+  input: OpenAICompatibleInput,
+  write: (obj: PercentProxyEvent) => void,
+  state: { started: boolean; usage: AssistantMessage["usage"] },
+) {
+  let response: Response;
+  try {
+    response = await fetch(completionsUrl(input.baseUrl), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify(buildChatBody(input, true)),
+    });
+  } catch (error) {
+    throw new Error(describeFetchError(error));
+  }
+  if (!response.ok || !response.body) {
+    const text = await response.text();
+    throw new Error(text.slice(0, 500));
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data: ")) continue;
+      const data = trimmed.slice(6);
+      if (!data || data === "[DONE]") continue;
+      const chunk = JSON.parse(data) as {
+        choices?: Array<{ delta?: { content?: string }; finish_reason?: string }>;
+        usage?: ChatCompletionResponse["usage"];
+      };
+      const delta = chunk.choices?.[0]?.delta?.content ?? "";
+      if (delta) {
+        if (!state.started) {
+          write({ type: "text_start", contentIndex: 0 });
+          state.started = true;
+        }
+        write({ type: "text_delta", contentIndex: 0, delta });
+      }
+      if (chunk.usage) Object.assign(state.usage, toUsage(chunk.usage));
+    }
+  }
+}
+
+export function streamOpenAICompatible(input: OpenAICompatibleStreamInput) {
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       const enc = new TextEncoder();
       const write = (obj: PercentProxyEvent) =>
         controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
-      const usage = emptyUsage;
-      let started = false;
+      const state = { usage: { ...emptyUsage }, started: false };
       try {
         write({ type: "start" });
-        let response: Response;
         try {
-          response = await fetch(`${input.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${input.apiKey}`,
-            },
-            body: JSON.stringify({
-              model: input.modelId,
-              messages: buildMessages(input.systemPrompt, input.messages),
-              max_tokens: input.maxTokens,
-              stream: true,
-            }),
-          });
-        } catch (error) {
-          throw new Error(describeFetchError(error));
-        }
-        if (!response.ok || !response.body) {
-          const text = await response.text();
-          throw new Error(text.slice(0, 500));
-        }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data: ")) continue;
-            const data = trimmed.slice(6);
-            if (!data || data === "[DONE]") continue;
-            const chunk = JSON.parse(data) as {
-              choices?: Array<{ delta?: { content?: string }; finish_reason?: string }>;
-              usage?: ChatCompletionResponse["usage"];
-            };
-            const delta = chunk.choices?.[0]?.delta?.content ?? "";
-            if (delta) {
-              if (!started) {
-                write({ type: "text_start", contentIndex: 0 });
-                started = true;
-              }
-              write({ type: "text_delta", contentIndex: 0, delta });
-            }
-            if (chunk.usage) Object.assign(usage, toUsage(chunk.usage));
+          await writeOpenAICompatibleStream(input, write, state);
+        } catch (primaryError) {
+          if (!input.fallback) throw primaryError;
+          if (state.started) throw primaryError;
+          input.onPrimaryError?.(primaryError);
+          try {
+            await writeOpenAICompatibleStream(input.fallback, write, state);
+          } catch (fallbackError) {
+            input.onFallbackError?.(fallbackError);
+            throw fallbackError;
           }
         }
-        if (started) write({ type: "text_end", contentIndex: 0 });
-        write({ type: "done", reason: "stop", usage });
+        if (state.started) write({ type: "text_end", contentIndex: 0 });
+        write({ type: "done", reason: "stop", usage: state.usage });
       } catch (error) {
         write({
           type: "error",
           reason: "error",
           errorMessage: error instanceof Error ? error.message : String(error),
-          usage,
+          usage: state.usage,
         });
       } finally {
         controller.close();
       }
     },
   });
+}
+
+export function streamMoonshotKimi(input: OpenAICompatibleStreamInput) {
+  return streamOpenAICompatible(input);
 }

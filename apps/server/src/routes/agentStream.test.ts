@@ -242,3 +242,66 @@ test("prefers per-provider env var over generic LLM_API_KEY", async () => {
   });
   assert.equal(res.status, 200);
 });
+
+test("falls back to backup model for native Kimi stream without changing request shape", async () => {
+  reset();
+  process.env.NODE_ENV = "production";
+  process.env.MOONSHOT_NATIVE_PROXY = "1";
+  process.env.KIMI_API_KEY = "sk-kimi";
+  process.env.LLM_BACKUP_API_KEY = "sk-backup";
+  process.env.LLM_BACKUP_BASE_URL = "https://backup.example.com/v1";
+  const requestedUrls: string[] = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const fetchMock = mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
+    requestedUrls.push(String(url));
+    requestBodies.push(JSON.parse(String(init?.body)));
+    if (String(url).includes("moonshot")) {
+      throw new Error("moonshot stream down");
+    }
+    return new Response(
+      [
+        "data: {\"choices\":[{\"delta\":{\"content\":\"backup\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" stream\"}}]}\n\n",
+        "data: [DONE]\n\n",
+      ].join(""),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  });
+
+  try {
+    const res = await postStream({
+      model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
+      context: {
+        systemPrompt: "You are helpful.",
+        messages: [{ role: "user", content: "hi" }],
+      },
+      options: { maxTokens: 64 },
+    });
+    assert.equal(res.status, 200);
+    const text = await res.text();
+    const events = text
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)) as { type: string; delta?: string });
+    assert.deepEqual(requestedUrls, [
+      "https://api.moonshot.cn/v1/chat/completions",
+      "https://backup.example.com/v1/chat/completions",
+    ]);
+    assert.equal(requestBodies[0].model, "kimi-k2.6");
+    assert.equal(requestBodies[0].stream, true);
+    assert.equal(requestBodies[1].model, "gpt-5.5");
+    assert.equal(requestBodies[1].stream, true);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["start", "text_start", "text_delta", "text_delta", "text_end", "done"],
+    );
+    assert.equal(events[2].delta, "backup");
+    assert.equal(events[3].delta, " stream");
+  } finally {
+    fetchMock.mock.restore();
+    delete process.env.MOONSHOT_NATIVE_PROXY;
+    delete process.env.LLM_BACKUP_API_KEY;
+    delete process.env.LLM_BACKUP_BASE_URL;
+    process.env.NODE_ENV = "test";
+  }
+});

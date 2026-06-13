@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mock } from "node:test";
 
-import { completeMoonshotKimi } from "./moonshot.js";
+import { completeMoonshotKimi, streamOpenAICompatible } from "./moonshot.js";
 import { streamMoonshotKimi } from "./moonshot.js";
 
 test("completeMoonshotKimi disables Kimi thinking for short JSON-style calls", async () => {
@@ -64,6 +64,61 @@ test("streamMoonshotKimi leaves thinking available for chat-agent streams", asyn
     const body: Record<string, unknown> = requestBody;
     assert.equal(body.stream, true);
     assert.equal("thinking" in body, false);
+  } finally {
+    fetchMock.mock.restore();
+  }
+});
+
+test("streamOpenAICompatible falls back without exposing a stream error", async () => {
+  const requestedUrls: string[] = [];
+  const fetchMock = mock.method(globalThis, "fetch", async (url: string | URL | Request) => {
+    const requestUrl = String(url);
+    requestedUrls.push(requestUrl);
+    if (requestUrl.includes("moonshot")) {
+      throw new Error("primary connect timeout");
+    }
+    return new Response(
+      [
+        "data: {\"choices\":[{\"delta\":{\"content\":\"backup\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" ok\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+        "data: [DONE]\n\n",
+      ].join(""),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+  });
+
+  try {
+    const stream = streamOpenAICompatible({
+      apiKey: "sk-primary",
+      baseUrl: "https://api.moonshot.cn/v1",
+      modelId: "kimi-k2.6",
+      messages: [{ role: "user", content: "hello" }],
+      maxTokens: 128,
+      fallback: {
+        apiKey: "sk-backup",
+        baseUrl: "https://backup.example.com/v1",
+        modelId: "gpt-5.5",
+        messages: [{ role: "user", content: "hello" }],
+        maxTokens: 128,
+      },
+    });
+
+    const text = await new Response(stream).text();
+    const events = text
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)) as { type: string; delta?: string });
+
+    assert.deepEqual(requestedUrls, [
+      "https://api.moonshot.cn/v1/chat/completions",
+      "https://backup.example.com/v1/chat/completions",
+    ]);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["start", "text_start", "text_delta", "text_delta", "text_end", "done"],
+    );
+    assert.equal(events[2].delta, "backup");
+    assert.equal(events[3].delta, " ok");
   } finally {
     fetchMock.mock.restore();
   }

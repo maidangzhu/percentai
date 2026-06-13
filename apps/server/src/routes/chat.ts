@@ -16,7 +16,12 @@ import {
   type TextContent,
 } from "@percent/runtime";
 import { elapsedMs, logError, logInfo } from "../lib/appLogger.js";
-import { completeMoonshotKimi, isMoonshotKimi, type MoonshotMessage } from "../lib/moonshot.js";
+import {
+  completeMoonshotKimi,
+  completeOpenAICompatible,
+  isMoonshotKimi,
+  type MoonshotMessage,
+} from "../lib/moonshot.js";
 
 // UserMessage.content is `string | (TextContent | ImageContent)[]`. We
 // can't import UserMessage directly (runtime re-exports only the union
@@ -53,6 +58,7 @@ type AppEnv = { Variables: { traceId?: string } };
 const app = new Hono<AppEnv>();
 const DEFAULT_LLM_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 2048);
 const LLM_RETRY_DELAY_MS = Number(process.env.LLM_RETRY_DELAY_MS ?? 300);
+const LLM_BACKUP_MODEL_ID = process.env.LLM_BACKUP_MODEL_ID ?? "gpt-5.5";
 
 function providerOptions(provider: string) {
   const options: { apiKey: string; maxTokens: number; temperature?: number } = {
@@ -94,6 +100,49 @@ async function callLlmWithOneRetry<T>(
     });
     if (LLM_RETRY_DELAY_MS > 0) await sleep(LLM_RETRY_DELAY_MS);
     return await fn();
+  }
+}
+
+function backupConfig() {
+  const apiKey = process.env.LLM_BACKUP_API_KEY;
+  const baseUrl = process.env.LLM_BACKUP_BASE_URL;
+  if (!apiKey || !baseUrl) return null;
+  return { apiKey, baseUrl, modelId: LLM_BACKUP_MODEL_ID };
+}
+
+async function completeMoonshotWithBackup(input: {
+  apiKey: string;
+  baseUrl: string;
+  modelId: string;
+  systemPrompt?: string;
+  messages: MoonshotMessage[];
+  maxTokens: number;
+  traceId?: string;
+  provider: string;
+  startedAt: number;
+}) {
+  try {
+    return await completeMoonshotKimi(input);
+  } catch (error) {
+    const fallback = backupConfig();
+    logError("chat.llm_backup", {
+      trace_id: input.traceId,
+      provider: input.provider,
+      model_id: input.modelId,
+      backup_model_id: fallback?.modelId,
+      error: String(error),
+      duration_ms: elapsedMs(input.startedAt),
+      enabled: Boolean(fallback),
+    });
+    if (!fallback) throw error;
+    return completeOpenAICompatible({
+      apiKey: fallback.apiKey,
+      baseUrl: fallback.baseUrl,
+      modelId: fallback.modelId,
+      systemPrompt: input.systemPrompt,
+      messages: input.messages,
+      maxTokens: input.maxTokens,
+    });
   }
 }
 
@@ -191,17 +240,17 @@ app.post("/", async (c) => {
   let text: string;
   try {
     if (isMoonshotKimi(body.provider, modelId, baseUrl, false)) {
-      const result = await callLlmWithOneRetry(
-        () => completeMoonshotKimi({
-          apiKey,
-          baseUrl,
-          modelId,
-          systemPrompt: body.system_prompt,
-          messages: messages as MoonshotMessage[],
-          maxTokens: DEFAULT_LLM_MAX_TOKENS,
-        }),
-        { traceId, provider: body.provider, modelId, startedAt },
-      );
+      const result = await completeMoonshotWithBackup({
+        apiKey,
+        baseUrl,
+        modelId,
+        systemPrompt: body.system_prompt,
+        messages: messages as MoonshotMessage[],
+        maxTokens: DEFAULT_LLM_MAX_TOKENS,
+        traceId,
+        provider: body.provider,
+        startedAt,
+      });
       text = result.text;
       logInfo("chat.ok", {
         trace_id: traceId,

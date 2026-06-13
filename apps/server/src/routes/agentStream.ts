@@ -50,6 +50,7 @@ const proxyBodySchema = z.object({
 type AppEnv = { Variables: { traceId?: string } };
 const app = new Hono<AppEnv>();
 const DEFAULT_AGENT_MAX_TOKENS = Number(process.env.AGENT_MAX_TOKENS ?? 4096);
+const LLM_BACKUP_MODEL_ID = process.env.LLM_BACKUP_MODEL_ID ?? "gpt-5.5";
 
 const emptyUsage: AssistantMessage["usage"] = {
   input: 0,
@@ -62,6 +63,13 @@ const emptyUsage: AssistantMessage["usage"] = {
 
 function isKimiProvider(provider: string) {
   return provider === "moonshotai-cn" || provider === "moonshotai" || provider === "kimi";
+}
+
+function backupConfig() {
+  const apiKey = process.env.LLM_BACKUP_API_KEY;
+  const baseUrl = process.env.LLM_BACKUP_BASE_URL;
+  if (!apiKey || !baseUrl) return null;
+  return { apiKey, baseUrl, modelId: LLM_BACKUP_MODEL_ID };
 }
 
 function toProxyEvent(event: AssistantMessageEvent): PercentProxyEvent | undefined {
@@ -174,6 +182,7 @@ app.post("/model/stream", async (c) => {
 
   const baseUrl = m.baseUrl ?? "https://api.moonshot.cn/v1";
   if (isMoonshotKimi(provider, m.id, baseUrl)) {
+    const fallback = backupConfig();
     const body = streamMoonshotKimi({
       apiKey,
       baseUrl,
@@ -181,6 +190,37 @@ app.post("/model/stream", async (c) => {
       systemPrompt: context.systemPrompt ?? undefined,
       messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
       maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
+      fallback: fallback
+        ? {
+            apiKey: fallback.apiKey,
+            baseUrl: fallback.baseUrl,
+            modelId: fallback.modelId,
+            systemPrompt: context.systemPrompt ?? undefined,
+            messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
+            maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
+          }
+        : undefined,
+      onPrimaryError: (error) => {
+        logError("agent_stream.llm_backup", {
+          trace_id: traceId,
+          provider,
+          model_id: m.id,
+          backup_model_id: fallback?.modelId,
+          error: String(error),
+          duration_ms: elapsedMs(startedAt),
+          enabled: Boolean(fallback),
+        });
+      },
+      onFallbackError: (error) => {
+        logError("agent_stream.backup_failed", {
+          trace_id: traceId,
+          provider,
+          model_id: m.id,
+          backup_model_id: fallback?.modelId,
+          error: String(error),
+          duration_ms: elapsedMs(startedAt),
+        });
+      },
     });
     return new Response(body, {
       headers: {

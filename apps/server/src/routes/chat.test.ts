@@ -217,6 +217,55 @@ test("retries the non-stream chat provider call once", async () => {
   assert.equal(completeSimpleCallCount, 2);
 });
 
+test("falls back to backup model for native Kimi chat without changing request shape", async () => {
+  reset();
+  process.env.NODE_ENV = "production";
+  process.env.MOONSHOT_NATIVE_PROXY = "1";
+  process.env.KIMI_API_KEY = "sk-kimi";
+  process.env.LLM_BACKUP_API_KEY = "sk-backup";
+  process.env.LLM_BACKUP_BASE_URL = "https://backup.example.com/v1";
+  const requestedUrls: string[] = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const fetchMock = mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
+    requestedUrls.push(String(url));
+    requestBodies.push(JSON.parse(String(init?.body)));
+    if (String(url).includes("moonshot")) {
+      throw new Error("moonshot down");
+    }
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: "BACKUP REPLY" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+
+  try {
+    const res = await postChat({
+      messages: [{ role: "user", content: "hi" }],
+      provider: "kimi",
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { data: { text: string } };
+    assert.equal(body.data.text, "BACKUP REPLY");
+    assert.deepEqual(requestedUrls, [
+      "https://api.moonshot.cn/v1/chat/completions",
+      "https://backup.example.com/v1/chat/completions",
+    ]);
+    assert.equal(requestBodies[0].model, "kimi-k2.6");
+    assert.deepEqual(requestBodies[0].thinking, { type: "disabled" });
+    assert.equal(requestBodies[1].model, "gpt-5.5");
+    assert.equal("thinking" in requestBodies[1], false);
+  } finally {
+    fetchMock.mock.restore();
+    delete process.env.MOONSHOT_NATIVE_PROXY;
+    delete process.env.LLM_BACKUP_API_KEY;
+    delete process.env.LLM_BACKUP_BASE_URL;
+    process.env.NODE_ENV = "test";
+  }
+});
+
 test("folds top-level image_base64 into the first user message", async () => {
   reset();
   process.env.LLM_API_KEY = "sk";
