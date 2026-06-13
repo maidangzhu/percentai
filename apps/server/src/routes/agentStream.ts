@@ -48,6 +48,7 @@ const proxyBodySchema = z.object({
 
 type AppEnv = { Variables: { traceId?: string } };
 const app = new Hono<AppEnv>();
+const DEFAULT_AGENT_MAX_TOKENS = Number(process.env.AGENT_MAX_TOKENS ?? 4096);
 
 const emptyUsage: AssistantMessage["usage"] = {
   input: 0,
@@ -57,6 +58,10 @@ const emptyUsage: AssistantMessage["usage"] = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
+
+function isKimiProvider(provider: string) {
+  return provider === "moonshotai-cn" || provider === "moonshotai" || provider === "kimi";
+}
 
 function toProxyEvent(event: AssistantMessageEvent): PercentProxyEvent | undefined {
   switch (event.type) {
@@ -125,7 +130,7 @@ app.post("/model/stream", async (c) => {
     );
   }
   const { model: m, context, options } = parsed.data;
-  const provider = m.provider as ProviderId;
+  const provider = m.provider as string;
 
   // Resolve the API key: per-provider env first, then generic, then
   // the (deprecated) per-request key for back-compat with callers that
@@ -166,10 +171,13 @@ app.post("/model/stream", async (c) => {
   // AssistantMessageEventStream. The desktop runtime consumes the
   // narrower PercentProxyEvent protocol, so we convert before writing
   // each event to SSE.
-  const stream = streamSimple(modelObj, context as Context, {
+  const streamOptions: SimpleStreamOptions = {
     ...(options as SimpleStreamOptions),
     apiKey,
-  });
+    maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
+    temperature: options.temperature ?? (isKimiProvider(provider) ? 0.6 : undefined),
+  };
+  const stream = streamSimple(modelObj, context as Context, streamOptions);
 
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {

@@ -50,6 +50,20 @@ const requestSchema = z.object({
 
 type AppEnv = { Variables: { traceId?: string } };
 const app = new Hono<AppEnv>();
+const DEFAULT_LLM_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 2048);
+
+function providerOptions(provider: string) {
+  const options: { apiKey: string; maxTokens: number; temperature?: number } = {
+    apiKey: "",
+    maxTokens: DEFAULT_LLM_MAX_TOKENS,
+  };
+  if (provider === "kimi") {
+    // Kimi K2.6 rejects arbitrary temperatures for the production key, and
+    // uncapped reasoning can run past Vercel's function timeout.
+    options.temperature = 0.6;
+  }
+  return options;
+}
 
 app.post("/", async (c) => {
   const startedAt = Date.now();
@@ -144,10 +158,12 @@ app.post("/", async (c) => {
 
   let text: string;
   try {
+    const options = providerOptions(body.provider);
+    options.apiKey = apiKey;
     const result = await completeSimple(
       model,
       { systemPrompt: body.system_prompt, messages },
-      { apiKey },
+      options,
     );
     text = (result.content ?? [])
       .filter((c): c is { type: "text"; text: string } => c.type === "text")
