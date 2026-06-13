@@ -1,8 +1,7 @@
-import { authDb } from "@/lib/db";
+import { cmsApiFetch } from "@/lib/cmsApiClient";
+import type { TransactionsData } from "@/lib/cmsService";
 
 export const dynamic = "force-dynamic";
-
-const PAGE_SIZE = 100;
 
 export default async function TransactionsPage({
   searchParams,
@@ -14,37 +13,14 @@ export default async function TransactionsPage({
   const userFilter = sp.user?.trim() || undefined;
   const reasonFilter = sp.reason?.trim() || undefined;
 
-  const where = {
-    ...(userFilter ? { userId: userFilter } : {}),
+  const query = new URLSearchParams({
+    page: String(page),
+    ...(userFilter ? { user: userFilter } : {}),
     ...(reasonFilter ? { reason: reasonFilter } : {}),
-  };
-
-  const [rows, total, distinctReasons] = await Promise.all([
-    authDb.creditTransaction.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: PAGE_SIZE,
-      skip: page * PAGE_SIZE,
-    }),
-    authDb.creditTransaction.count({ where }),
-    authDb.creditTransaction.findMany({
-      distinct: ["reason"],
-      select: { reason: true },
-    }),
-  ]);
-
-  // 给 userId 附加上 email（取前 50 个减少 query）
-  const userIds = [...new Set(rows.map((r) => r.userId))].slice(0, 50);
-  const users =
-    userIds.length === 0
-      ? []
-      : await authDb.user.findMany({
-          where: { id: { in: userIds } },
-          select: { id: true, email: true, name: true },
-        });
-  const userMap = new Map(users.map((u) => [u.id, u]));
-
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  });
+  const { rows, total, totalPages, distinctReasons } = await cmsApiFetch<TransactionsData>(
+    `/api/transactions?${query}`
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -77,9 +53,9 @@ export default async function TransactionsPage({
           </label>
           <select className="input" name="reason" defaultValue={reasonFilter ?? ""} style={{ width: 200 }}>
             <option value="">全部</option>
-            {distinctReasons.map((r) => (
-              <option key={r.reason} value={r.reason}>
-                {r.reason}
+            {distinctReasons.map((reason) => (
+              <option key={reason} value={reason}>
+                {reason}
               </option>
             ))}
           </select>
@@ -116,7 +92,7 @@ export default async function TransactionsPage({
               </tr>
             ) : (
               rows.map((t) => {
-                const u = userMap.get(t.userId);
+                const u = t.user;
                 return (
                   <tr key={t.id}>
                     <td>{new Date(t.createdAt).toLocaleString()}</td>

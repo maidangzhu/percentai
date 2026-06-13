@@ -1,22 +1,11 @@
 import Link from "next/link";
-import { authDb } from "@/lib/db";
+import { cmsApiFetch } from "@/lib/cmsApiClient";
+import type { UserListItem } from "@/lib/cmsService";
 
 export const dynamic = "force-dynamic";
 
 export default async function UsersPage() {
-  const users = await authDb.user.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
-  const userIds = users.map((u) => u.id);
-
-  // 拉所有相关 credit 账户，一次性查
-  const credits = userIds.length
-    ? await authDb.userCredit.findMany({
-        where: { userId: { in: userIds } },
-      })
-    : [];
-  const creditMap = new Map(credits.map((c) => [c.userId, c]));
+  const { users } = await cmsApiFetch<{ users: UserListItem[] }>("/api/users");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -48,7 +37,6 @@ export default async function UsersPage() {
               </tr>
             ) : (
               users.map((u) => {
-                const credit = creditMap.get(u.id);
                 return (
                   <tr key={u.id}>
                     <td>
@@ -58,7 +46,7 @@ export default async function UsersPage() {
                     <td>{u.name || "—"}</td>
                     <td>{new Date(u.createdAt).toLocaleString()}</td>
                     <td style={{ textAlign: "right" }}>
-                      {credit ? credit.balance.toLocaleString() : (
+                      {u.balance != null ? u.balance.toLocaleString() : (
                         <span style={{ color: "var(--muted-foreground)" }}>未激活</span>
                       )}
                     </td>

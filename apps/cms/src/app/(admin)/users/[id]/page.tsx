@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { authDb } from "@/lib/db";
-import { CreditReason, adjustCredits, ensureSignupBonus, getBalance, InsufficientCreditsError, SIGNUP_BONUS } from "@/lib/creditActions";
+import { cmsApiFetch } from "@/lib/cmsApiClient";
+import type { UserDetailData } from "@/lib/cmsService";
 
 export const dynamic = "force-dynamic";
 
@@ -14,18 +14,14 @@ async function grantCreditAction(formData: FormData) {
   if (!userId || !deltaRaw) return;
   const delta = Number.parseInt(deltaRaw, 10);
   if (!Number.isFinite(delta) || delta === 0) return;
-  const reason =
-    delta > 0 ? CreditReason.AdminGrant : CreditReason.AdminAdjust;
 
   try {
-    await adjustCredits({
-      userId,
-      delta,
-      reason,
-      metadata: note ? { note } : undefined,
+    await cmsApiFetch(`/api/users/${encodeURIComponent(userId)}/credits/adjust`, {
+      method: "POST",
+      body: JSON.stringify({ delta, note }),
     });
   } catch (err) {
-    if (err instanceof InsufficientCreditsError) {
+    if (err instanceof Error && err.message.includes("insufficient")) {
       // 用 redirect 带错误信息回去
       const { redirect } = await import("next/navigation");
       redirect(`/users/${userId}?error=insufficient`);
@@ -42,7 +38,9 @@ async function ensureBonusAction(formData: FormData) {
   "use server";
   const userId = formData.get("userId")?.toString();
   if (!userId) return;
-  await ensureSignupBonus(userId);
+  await cmsApiFetch(`/api/users/${encodeURIComponent(userId)}/credits/ensure-signup-bonus`, {
+    method: "POST",
+  });
   revalidatePath(`/users/${userId}`);
   revalidatePath("/users");
 }
@@ -69,26 +67,14 @@ export default async function UserDetailPage({
   const { id } = await params;
   const { error } = await searchParams;
 
-  const user = await authDb.user.findUnique({ where: { id } });
-  if (!user) notFound();
-
-  await ensureSignupBonus(id);
-  const balance = await getBalance(id);
-  const [credit, txns, totals] = await Promise.all([
-    authDb.userCredit.findUnique({ where: { userId: id } }),
-    authDb.creditTransaction.findMany({
-      where: { userId: id },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    }),
-    authDb.$queryRaw<Array<{ reason: string; totalDelta: number }>>`
-      SELECT reason, SUM(delta) as "totalDelta"
-      FROM credit_transactions
-      WHERE user_id = ${id}
-      GROUP BY reason
-      ORDER BY "totalDelta" ASC
-    `,
-  ]);
+  let detail: UserDetailData;
+  try {
+    detail = await cmsApiFetch<UserDetailData>(`/api/users/${encodeURIComponent(id)}`);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("not found")) notFound();
+    throw err;
+  }
+  const { user, balance, hasCreditAccount, signupBonus, totals, transactions: txns } = detail;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -109,9 +95,9 @@ export default async function UserDetailPage({
           <div style={{ fontSize: 32, fontWeight: 600, marginTop: 2 }}>
             {balance.toLocaleString()}
           </div>
-          {credit ? null : (
+          {hasCreditAccount ? null : (
             <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>
-              首次访问已自动发放 {SIGNUP_BONUS} 点
+              首次访问已自动发放 {signupBonus} 点
             </div>
           )}
         </div>
@@ -177,11 +163,11 @@ export default async function UserDetailPage({
             提交
           </button>
         </form>
-        {!credit && (
+        {!hasCreditAccount && (
           <form action={ensureBonusAction} style={{ marginTop: 12 }}>
             <input type="hidden" name="userId" value={user.id} />
             <button className="btn" type="submit">
-              手动发放注册奖励 {SIGNUP_BONUS} 点
+              手动发放注册奖励 {signupBonus} 点
             </button>
           </form>
         )}
@@ -207,7 +193,7 @@ export default async function UserDetailPage({
                 <tr key={row.reason}>
                   <td><code style={{ fontSize: 12 }}>{row.reason}</code></td>
                   <td style={{ textAlign: "right" }}>{Number(row.totalDelta).toLocaleString()}</td>
-                  <td style={{ textAlign: "right" }}>—</td>
+                  <td style={{ textAlign: "right" }}>{row.count.toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>

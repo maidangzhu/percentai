@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start -p 3001",
     "typecheck": "tsc --noEmit",
+    "test:api": "node test/api-smoke.mjs",
     "prisma:generate": "prisma generate --schema prisma/auth.prisma"
   },
   "dependencies": {

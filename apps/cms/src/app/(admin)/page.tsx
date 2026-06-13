@@ -1,57 +1,7 @@
-import { authDb } from "@/lib/db";
+import { cmsApiFetch } from "@/lib/cmsApiClient";
+import type { DashboardData } from "@/lib/cmsService";
 
 export const dynamic = "force-dynamic";
-
-async function loadStats() {
-  const [
-    totalUsers,
-    totalCreditAccounts,
-    sumBalanceRaw,
-    recentConsumption,
-    topConsumers,
-  ] = await Promise.all([
-    authDb.user.count(),
-    authDb.userCredit.count(),
-    authDb.userCredit.aggregate({ _sum: { balance: true } }),
-    authDb.creditTransaction.aggregate({
-      where: { delta: { lt: 0 } },
-      _sum: { delta: true },
-    }),
-    authDb.$queryRaw<Array<{ userId: string; spent: number; count: number }>>`
-      SELECT user_id as "userId",
-             SUM(-delta) as spent,
-             COUNT(*) as count
-      FROM credit_transactions
-      WHERE delta < 0
-      GROUP BY user_id
-      ORDER BY spent DESC
-      LIMIT 5
-    `,
-  ]);
-
-  // 最近 14 天的每日 AI 消耗（按 reason 分组）
-  const dailyUsage = await authDb.$queryRaw<
-    Array<{ day: string; reason: string; spent: number }>
-  >`
-    SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day,
-           reason,
-           SUM(-delta) as spent
-    FROM credit_transactions
-    WHERE delta < 0
-      AND created_at >= NOW() - INTERVAL '14 days'
-    GROUP BY day, reason
-    ORDER BY day ASC
-  `;
-
-  return {
-    totalUsers,
-    totalCreditAccounts,
-    totalBalance: sumBalanceRaw._sum.balance ?? 0,
-    totalConsumed: Math.abs(recentConsumption._sum.delta ?? 0),
-    topConsumers,
-    dailyUsage,
-  };
-}
 
 function formatNum(n: number): string {
   if (Math.abs(n) >= 10000) {
@@ -102,12 +52,7 @@ function StatCard({
 }
 
 export default async function DashboardPage() {
-  const stats = await loadStats();
-  const recentUsers = await authDb.user.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 5,
-    select: { id: true, email: true, name: true, createdAt: true },
-  });
+  const { stats, recentUsers } = await cmsApiFetch<DashboardData>("/api/dashboard");
 
   return (
     <div className="flex flex-col gap-6">

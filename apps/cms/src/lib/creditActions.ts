@@ -3,7 +3,7 @@
 
 import { authDb } from "@/lib/db";
 
-export const SIGNUP_BONUS = 2000;
+export const SIGNUP_BONUS = 100;
 
 export const CreditReason = {
   SignupBonus: "signup_bonus",
