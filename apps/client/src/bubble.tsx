@@ -17,7 +17,7 @@ import {
   type SuggestStyle,
 } from "@/bubble/popoverQueue";
 import { cn } from "@/lib/utils";
-import { maybeAddTaskToCalendar } from "@/lib/calendar";
+import { createTaskWithCalendar } from "@/lib/tasks";
 import { isExistingTaskCandidate, fetchPendingTasks } from "@/lib/taskDedup";
 import { listPeople } from "@/db/people";
 import { db } from "@/db/client";
@@ -601,6 +601,7 @@ export default function Bubble() {
     try {
       const { db } = await import("@/db/client");
       const { newSnowflakeId } = await import("@/lib/snowflake");
+      let calendarResult: Awaited<ReturnType<typeof createTaskWithCalendar>>["calendar"] | null = null;
       if (candidate.action === "update" && candidate.update_target_id) {
         await db.updateTask({
           id: candidate.update_target_id,
@@ -609,7 +610,7 @@ export default function Bubble() {
           dueAt: candidate.due_at ?? undefined,
         });
       } else {
-        await db.createTask({
+        const created = await createTaskWithCalendar({
           id: newSnowflakeId(),
           title: candidate.title,
           description: candidate.description ?? "",
@@ -620,14 +621,10 @@ export default function Bubble() {
           evidence: candidate.evidence ?? "",
           fingerprint: candidate.fingerprint ?? newSnowflakeId(),
         });
+        calendarResult = created.calendar;
       }
       // update 模式不重写 calendar
-      if (candidate.action !== "update") {
-        const calendarResult = await maybeAddTaskToCalendar({
-          title: candidate.title,
-          description: candidate.description,
-          due_at: candidate.due_at,
-        });
+      if (calendarResult) {
         if (calendarResult.added) {
           showSuggestionPanel({
             title: "Calendar",

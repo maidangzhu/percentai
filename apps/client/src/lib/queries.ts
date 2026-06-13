@@ -13,6 +13,7 @@ import {
 } from "@/lib/types";
 import { authFetch } from "@/lib/auth";
 import { newSnowflakeId } from "@/lib/snowflake";
+import { createTaskWithCalendar } from "@/lib/tasks";
 
 /* ── Query keys ─────────────────────────────────────────────── */
 
@@ -180,7 +181,7 @@ export function useCreateTask() {
       if (existing) {
         return toDomainTask(existing);
       }
-      const created = await db.createTask({
+      const { task: created } = await createTaskWithCalendar({
         id: newSnowflakeId(),
         title: input.title,
         description: input.description,

@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatNumber } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
-import { maybeAddTaskToCalendar } from "@/lib/calendar";
 import type { TaskRow } from "@/lib/types";
 
 export function TasksView({
@@ -27,7 +26,6 @@ export function TasksView({
   const [newDueAt, setNewDueAt] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
-  const [calendarHint, setCalendarHint] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
   const pendingCount = tasks.filter((t) => t.status === "pending").length;
@@ -41,26 +39,12 @@ export function TasksView({
     setNewTitle("");
     setNewDueAt("");
 
-    // 乐观插入立刻由 MainWindow 完成；这里 fire-and-forget 等结果只为日历
+    // MainWindow/useCreateTask handles the DB write and Calendar side effect.
     void (async () => {
-      const created = await onCreateTask({
+      await onCreateTask({
         title,
         due_at: dueAtIso,
       });
-      if (created) {
-        const result = await maybeAddTaskToCalendar({
-          title,
-          description: created.description,
-          due_at: dueAtIso,
-        });
-        if (result.added) {
-          setCalendarHint("Added to Calendar");
-          window.setTimeout(() => setCalendarHint(""), 2400);
-        } else if (result.attempted) {
-          setCalendarHint(`Not added to Calendar: ${result.error}`);
-          window.setTimeout(() => setCalendarHint(""), 4000);
-        }
-      }
     })();
   };
 
@@ -145,9 +129,6 @@ export function TasksView({
             Add
           </Button>
         </form>
-        {calendarHint && (
-          <p className="mt-2 text-[12px] text-muted-foreground">{calendarHint}</p>
-        )}
       </div>
 
       <div className="flex-1 overflow-y-auto scroll-thin">

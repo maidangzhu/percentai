@@ -13,6 +13,7 @@ import { listPeople, getPerson } from "@/db/people";
 import { listLogs } from "@/db/logs";
 import { db } from "@/db/client";
 import { newSnowflakeId } from "@/lib/snowflake";
+import { createTaskWithCalendar } from "@/lib/tasks";
 
 export const SCREEN_AGENT_SYSTEM_PROMPT = `
 你是 Percent 桌面气泡里的个人助理 Agent——一个会感知用户当前处境、能调用本地工具、能为用户处理关系和信息压力的 screen agent。你不是单纯的"屏幕描述器"。
@@ -419,7 +420,7 @@ export function createPercentTools(_toolsOptions?: ToolsOptions): AgentTool[] {
           if (!args.title?.trim()) {
             return asTextResult({ error: "title required for create" });
           }
-          const created = await db.createTask({
+          const { task: created, calendar } = await createTaskWithCalendar({
             id: newSnowflakeId(),
             title: args.title,
             description: args.description ?? "",
@@ -438,7 +439,7 @@ export function createPercentTools(_toolsOptions?: ToolsOptions): AgentTool[] {
             created_at: created.created_at,
             completed_at: null,
           };
-          return asTextResult({ task });
+          return asTextResult({ task, calendar });
         }
 
         if (args.action === "update") {
