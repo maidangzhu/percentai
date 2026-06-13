@@ -35,28 +35,40 @@ loadEnv();
 
 // CMS 只读 Neon：账号、积分、积分流水。
 // 不读本地 SQLite（聊天/任务/agent 对话等业务数据用户不上云，CMS 也不该看）。
-const authDatabaseSchema = process.env["AUTH_DATABASE_SCHEMA"] ?? "auth";
-const authConnectionString =
-  process.env["AUTH_DATABASE_URL"] ??
-  process.env["NEON_DATABASE_URL"] ??
-  process.env["DATABASE_URL"];
+function authDatabaseSchema() {
+  const schema = process.env["AUTH_DATABASE_SCHEMA"] ?? "auth";
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schema)) {
+    throw new Error("AUTH_DATABASE_SCHEMA must be a valid PostgreSQL identifier");
+  }
+  return schema;
+}
 
-if (!authConnectionString) {
-  throw new Error("AUTH_DATABASE_URL / NEON_DATABASE_URL / DATABASE_URL is required for CMS");
+function authConnectionString() {
+  const value =
+    process.env["AUTH_DATABASE_URL"] ??
+    process.env["NEON_DATABASE_URL"] ??
+    process.env["DATABASE_URL"];
+  if (!value) {
+    throw new Error("AUTH_DATABASE_URL / NEON_DATABASE_URL / DATABASE_URL is required for CMS");
+  }
+  return value;
+}
+
+function normalizeUrl(value: string) {
+  return value
+    .trim()
+    .replace(/^['"]|['"]$/g, "")
+    .replace(/\\n/g, "")
+    .replace(/\r?\n/g, "");
 }
 
 function withSchema(url: string, schema: string) {
-  const parsed = new URL(url.trim());
+  const parsed = new URL(normalizeUrl(url));
   if (!parsed.searchParams.has("schema")) {
     parsed.searchParams.set("schema", schema);
   }
   return parsed.toString();
 }
-
-const authAdapter = new PrismaNeon(
-  { connectionString: withSchema(authConnectionString, authDatabaseSchema) },
-  { schema: authDatabaseSchema }
-);
 
 declare global {
   // eslint-disable-next-line no-var
@@ -68,16 +80,38 @@ declare global {
 // 这里用 $extends 在每个 query 前显式 SET LOCAL search_path TO 'auth'，跟 PrismaPg 在 server
 // 那边 libpq 自动应用 ?schema=auth 的效果一致。SET LOCAL 只在当前 transaction 内生效，
 // 不污染连接池里的其它 session。
-const baseClient = globalThis.__cmsAuthPrisma ?? new AuthPrisma({ adapter: authAdapter });
-const searchPathClient = baseClient.$extends({
-  query: {
-    async $allOperations({ args, query }) {
-      await baseClient.$executeRawUnsafe("SET LOCAL search_path TO auth");
-      return query(args);
+function createAuthDb() {
+  const schema = authDatabaseSchema();
+  const authAdapter = new PrismaNeon(
+    { connectionString: withSchema(authConnectionString(), schema) },
+    { schema }
+  );
+  const baseClient = globalThis.__cmsAuthPrisma ?? new AuthPrisma({ adapter: authAdapter });
+  const searchPathClient = baseClient.$extends({
+    query: {
+      async $allOperations({ args, query }) {
+        await baseClient.$executeRawUnsafe(`SET LOCAL search_path TO ${schema}`);
+        return query(args);
+      },
     },
+  });
+  if (process.env.NODE_ENV !== "production") {
+    globalThis.__cmsAuthPrisma = baseClient;
+  }
+  return searchPathClient;
+}
+
+type AuthDb = ReturnType<typeof createAuthDb>;
+
+let lazyAuthDb: AuthDb | null = null;
+
+function getAuthDb() {
+  lazyAuthDb ??= createAuthDb();
+  return lazyAuthDb;
+}
+
+export const authDb = new Proxy({} as AuthDb, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getAuthDb(), prop, receiver);
   },
 });
-export const authDb = searchPathClient;
-if (process.env.NODE_ENV !== "production") {
-  globalThis.__cmsAuthPrisma = baseClient;
-}
