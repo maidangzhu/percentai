@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { logInfo, logWarn } from "./lib/appLogger.js";
-import app from "./index.js";
+import { app } from "./index.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 

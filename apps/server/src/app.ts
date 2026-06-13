@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { handle } from "hono/vercel";
 
+import { auth } from "./auth/index.js";
 import { authGuard } from "./middleware/authGuard.js";
 import { apiLogger } from "./middleware/apiLogger.js";
 import { gatewayErrorHandler, responseGateway } from "./middleware/responseGateway.js";
@@ -19,7 +21,7 @@ const allowedOrigins = new Set([
   "http://tauri.localhost",
 ]);
 
-export async function createApp(auth: AppAuth) {
+export function createApp(auth: AppAuth) {
   const app = new Hono();
 
   app.use(
@@ -60,3 +62,7 @@ export async function createApp(auth: AppAuth) {
 
   return app;
 }
+
+export const app = createApp(auth);
+
+export default handle(app);
