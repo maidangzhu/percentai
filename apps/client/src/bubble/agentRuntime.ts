@@ -13,7 +13,6 @@ import { listPeople, getPerson } from "@/db/people";
 import { listLogs } from "@/db/logs";
 import { db } from "@/db/client";
 import { newSnowflakeId } from "@/lib/snowflake";
-import { invoke } from "@tauri-apps/api/core";
 
 export const SCREEN_AGENT_SYSTEM_PROMPT = `
 你是 Percent 桌面气泡里的个人助理 Agent——一个会感知用户当前处境、能调用本地工具、能为用户处理关系和信息压力的 screen agent。你不是单纯的"屏幕描述器"。
@@ -38,18 +37,9 @@ export const SCREEN_AGENT_SYSTEM_PROMPT = `
 2. manage_chats — 聊天消息。action=list 拿某联系人最近 N 条（person_id 或 person_name 二选一，limit 默认 30）；search 全文本搜（keyword 必填，可选 person_name/since_days）。当用户问"她刚才说的什么意思""之前聊过什么"→ list。问"谁说过 X"→ search。要起草回复时也用 list，可以顺带传 tone/intent 当 context 提示。
 3. manage_tasks — 任务 CRUD。action=list/get/create/update/delete 五种。create 必填 title，可选 description/due_at；update 必填 task_id，可选 title/description/due_at/status_update；delete 必填 task_id。用户说"记一下"→ create；"改个时间"→ update；"这个不要了/取消"→ delete。
 4. manage_logs — 截屏/操作日志。action=list 返回最近的截屏元数据（不含图片内容），可选 app_name 过滤。
-5. run_bash — 在用户 Mac 上跑 bash 命令。**每次调用都会被前端弹一个审批卡给用户**（展示完整 cmd 字符串），用户 Approve / Edit / Deny。同一个 session 内已被批准过的命令（exact match）自动放行。timeout 默认 30s，输出上限 32KB；超时会强制 kill。返回 { stdout, stderr, exit_code, truncated, timed_out }。**不要用 bash 做 manage_* 工具能做的事**——bash 是为了访问本地文件系统和 shell，不是替代专用工具。
-6. read_file — 读 ~/ 下的本地文件。**路径必须在 ~/ 下，否则 Tauri 端会直接拒绝**。max_bytes 默认 256KB，上限 4MB；超出会截断并设 truncated=true。文本按 utf8 返回，二进制回 base64 + encoding="base64"。用户问"~/Documents 里有什么合同"、"这个文件内容是什么"→ read_file 配合 run_bash 一起用。
-
-【新工具的使用场景】
-- 帮用户查本地文件："~/Documents 里有什么合同" → 先 run_bash 'ls ~/Documents' 列目录，再 read_file 读具体文件
-- 帮用户看 git status、跑测试、查进程 → run_bash
-- 帮用户读邮件草稿、查 Settings、写本地脚本 → read_file + run_bash
 
 【重要边界】
-- bash 是危险工具。不要主动跑会改变系统状态（rm -rf、kill -9、curl | sh、sudo 等）的命令，除非用户明确要求
-- read_file 不要读 /etc /private /System 下的东西（会被自动拒绝）—— ~/ 下找就行
-- 如果 bash 输出被截断（truncated=true），告诉用户"输出超 32KB，建议用 | head / > /tmp 之类的写文件再 read_file"
+- 你暂时不能执行 shell 命令，也不能直接读取本地文件内容。用户要求查文件、跑命令、看 git/test/process 时，直接说明"这个我暂时做不到"。
 
 【屏幕上下文】
 - 用户每次向你发消息时，当前屏幕截图会作为图片块附在消息里。你直接读图，不要假装调用 read_screen。
@@ -87,22 +77,7 @@ function asTextResult(details: unknown) {
   };
 }
 
-// ── Agent 客户端工具（bash / read_file）───────────────────────────────────
-
-export interface BashResult {
-  stdout: string;
-  stderr: string;
-  exit_code: number;
-  truncated: boolean;
-  timed_out: boolean;
-}
-
-export interface FileReadResult {
-  content: string;
-  encoding: "utf8" | "base64";
-  bytes_read: number;
-  truncated: boolean;
-}
+// ── Agent 客户端工具审批类型（保留给后续重新启用高风险工具）───────────────
 
 export interface ApprovalRequest {
   toolCallId: string;
@@ -133,10 +108,6 @@ export interface ToolsOptions {
    * 用 ref-style 让 tool execute 能读能写。bubble 在新 user message 时清零。
    */
   turnAllowed: { current: boolean };
-}
-
-function bashCommandKey(args: { cmd: string; cwd?: string }): string {
-  return JSON.stringify({ cmd: args.cmd, cwd: args.cwd ?? null });
 }
 
 // 所有 LLM 调用都走 server-proxy 模式（default）。server 端持 provider
@@ -209,7 +180,7 @@ export function uiMessagesToRuntimeMessages(messages: Array<{ role: "user" | "as
 
 export function createPercentTools(): AgentTool[];
 export function createPercentTools(toolsOptions: ToolsOptions): AgentTool[];
-export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
+export function createPercentTools(_toolsOptions?: ToolsOptions): AgentTool[] {
   return [
     {
       name: "manage_people",
@@ -545,103 +516,6 @@ export function createPercentTools(toolsOptions?: ToolsOptions): AgentTool[] {
               screenshot_path: row.screenshot_path,
             })),
         });
-      },
-    },
-    {
-      name: "run_bash",
-      label: "Run Bash",
-      description:
-        "Execute a shell command on the user's Mac. **Every call is shown to the user in an inline approval card** (cmd string visible). Same command already approved in this session auto-passes. Output capped at 32KB; timeout default 30s. Returns { stdout, stderr, exit_code, truncated, timed_out }.",
-      parameters: Type.Object({
-        cmd: Type.String({
-          minLength: 1,
-          description: "要执行的 bash 命令（含 args）。会被原样展示给用户审批。",
-        }),
-        cwd: Type.Optional(
-          Type.String({ description: "工作目录，缺省 = $HOME" })
-        ),
-        timeout_ms: Type.Optional(
-          Type.Number({
-            minimum: 1_000,
-            maximum: 120_000,
-            default: 30_000,
-            description: "超时毫秒；超时会强制 kill 进程",
-          })
-        ),
-      }),
-      execute: async (toolCallId, params) => {
-        if (!toolsOptions) {
-          return asTextResult({ error: "toolsOptions missing (bubble wiring bug)" });
-        }
-        const args = params as { cmd: string; cwd?: string; timeout_ms?: number };
-        const key = bashCommandKey(args);
-        let finalArgs = { ...args };
-
-        // 本轮已开启"全部放行"或该 cmd 已在 session 白名单 → 直接跑，不问
-        const skipApproval =
-          toolsOptions.turnAllowed.current || toolsOptions.approvedCommands.has(key);
-
-        if (!skipApproval) {
-          const decision = await toolsOptions.approvalRequest({
-            toolCallId,
-            toolName: "run_bash",
-            args: args as unknown as Record<string, unknown>,
-          });
-          if (!decision.approved) {
-            return asTextResult({
-              error: "User denied the command. Try a different approach or ask the user for guidance.",
-              cmd: args.cmd,
-            });
-          }
-          if (decision.editedArgs) {
-            const edited = decision.editedArgs as { cmd?: string; cwd?: string; timeout_ms?: number };
-            if (typeof edited.cmd === "string" && edited.cmd.trim()) {
-              finalArgs.cmd = edited.cmd;
-            }
-            if (typeof edited.cwd === "string") {
-              finalArgs.cwd = edited.cwd;
-            }
-          }
-          if (decision.approveForTurn) {
-            toolsOptions.turnAllowed.current = true;
-          }
-          toolsOptions.approvedCommands.add(bashCommandKey(finalArgs));
-        }
-
-        const result = await invoke<BashResult>("run_bash", {
-          cmd: finalArgs.cmd,
-          cwd: finalArgs.cwd ?? null,
-          timeout_ms: finalArgs.timeout_ms ?? null,
-        });
-        return asTextResult(result);
-      },
-    },
-    {
-      name: "read_file",
-      label: "Read File",
-      description:
-        "Read a file under the user's home directory (~/). **Paths outside ~/ are rejected by the Tauri side** with an error. Text returns as utf8; binary returns as base64 with encoding='base64'. max_bytes default 256KB, hard cap 4MB; truncation sets truncated=true.",
-      parameters: Type.Object({
-        path: Type.String({
-          minLength: 1,
-          description: "绝对路径，必须在 ~/ 下。Tauri 端会 canonicalize 并校验。",
-        }),
-        max_bytes: Type.Optional(
-          Type.Number({
-            minimum: 1,
-            maximum: 4_194_304,
-            default: 262_144,
-            description: "最多读多少字节。超出会截断。",
-          })
-        ),
-      }),
-      execute: async (_toolCallId, params) => {
-        const args = params as { path: string; max_bytes?: number };
-        const result = await invoke<FileReadResult>("read_local_file", {
-          path: args.path,
-          max_bytes: args.max_bytes ?? null,
-        });
-        return asTextResult(result);
       },
     },
   ];

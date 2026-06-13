@@ -232,8 +232,8 @@ export function ChatPanel({
       </div>
       )}
 
-      <ScrollArea className="flex-1 min-h-[150px]">
-        <div ref={scrollRef} className="flex flex-col gap-2 px-3 py-1">
+      <ScrollArea className="min-w-0 flex-1 min-h-[150px]">
+        <div ref={scrollRef} className="flex min-w-0 max-w-full flex-col gap-2 overflow-x-hidden px-3 py-1">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
               <div className="grid h-8 w-8 place-items-center rounded-full border border-dashed border-white/15 text-white/40">
@@ -338,7 +338,7 @@ function Bubble({ message, isLiveReasoning }: { message: AgentMessage; isLiveRea
   if (message.kind === "reasoning") {
     const open = reasoningOpen[message.id] ?? isLiveReasoning;
     return (
-      <div className="self-start">
+      <div className="max-w-full self-start">
         <button
           type="button"
           className="group inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-white/40 transition-colors hover:text-white/70"
@@ -352,7 +352,7 @@ function Bubble({ message, isLiveReasoning }: { message: AgentMessage; isLiveRea
           <span>{isLiveReasoning ? "Thinking" : "Reasoned"}</span>
         </button>
         {open && (
-          <em className="mt-1 block max-w-[92%] border-l-2 border-white/15 pl-2 text-[11.5px] italic leading-relaxed text-white/50">
+          <em className="mt-1 block max-w-[92%] overflow-hidden break-words border-l-2 border-white/15 pl-2 text-[11.5px] italic leading-relaxed text-white/50">
             {message.content}
           </em>
         )}
@@ -369,7 +369,7 @@ function Bubble({ message, isLiveReasoning }: { message: AgentMessage; isLiveRea
           isError ? "border-white/20 text-white/70" : "border-white/[0.08] text-white/55"
         )}
       >
-        <div className="mb-0.5 flex items-center gap-1.5 font-medium tracking-tight text-white/80">
+        <div className="mb-0.5 flex min-w-0 items-center gap-1.5 font-medium tracking-tight text-white/80">
           {message.kind === "tool_call" ? (
             <Wrench className="h-3 w-3" strokeWidth={1.75} />
           ) : isError ? (
@@ -377,13 +377,13 @@ function Bubble({ message, isLiveReasoning }: { message: AgentMessage; isLiveRea
           ) : (
             <CheckCircle2 className="h-3 w-3" strokeWidth={1.75} />
           )}
-          <span className="text-mono-caps text-[9.5px] uppercase tracking-wider">
+          <span className="min-w-0 truncate text-mono-caps text-[9.5px] uppercase tracking-wider">
             {message.kind === "tool_result" && (isError ? "失败" : "完成")}{" "}
             {message.toolName ?? "tool"}
           </span>
         </div>
         {message.toolResult != null && (
-          <pre className="mt-1 max-h-16 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-black/40 px-1.5 py-1 font-mono text-[10px] leading-relaxed text-white/55">
+          <pre className="mt-1 max-h-16 max-w-full overflow-auto whitespace-pre-wrap break-all rounded bg-black/40 px-1.5 py-1 font-mono text-[10px] leading-relaxed text-white/55">
             {formatPayload(message.toolResult)}
           </pre>
         )}
@@ -400,10 +400,10 @@ function Bubble({ message, isLiveReasoning }: { message: AgentMessage; isLiveRea
   }
 
   return (
-    <div className={cn("flex w-full", isSelf ? "justify-end" : "justify-start")}>
+    <div className={cn("flex w-full min-w-0 max-w-full", isSelf ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[86%] rounded-2xl px-3 py-1.5 text-[12.5px] leading-relaxed",
+          "min-w-0 max-w-[86%] overflow-hidden rounded-2xl px-3 py-1.5 text-[12.5px] leading-relaxed",
           isSelf
             ? "rounded-br-md bg-white text-black"
             : "rounded-bl-md border border-white/[0.10] bg-white/[0.04] text-white"
@@ -412,7 +412,7 @@ function Bubble({ message, isLiveReasoning }: { message: AgentMessage; isLiveRea
         {isSelf ? (
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
         ) : (
-          <div className="prose prose-invert prose-sm max-w-none [&_a]:underline [&_code]:rounded [&_code]:bg-white/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[10.5px] [&_p]:m-0 [&_p+p]:mt-1.5 [&_ul]:mt-1.5 [&_ol]:mt-1.5 [&_pre]:mt-1.5 [&_pre]:rounded-md [&_pre]:bg-black [&_pre]:p-2 [&_pre]:text-white [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-white">
+          <div className="prose prose-invert prose-sm max-w-none overflow-hidden break-words [&_a]:underline [&_code]:break-all [&_code]:rounded [&_code]:bg-white/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[10.5px] [&_p]:m-0 [&_p+p]:mt-1.5 [&_ul]:mt-1.5 [&_ol]:mt-1.5 [&_pre]:mt-1.5 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_pre]:rounded-md [&_pre]:bg-black [&_pre]:p-2 [&_pre]:text-white [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-white">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
           </div>
         )}
@@ -479,7 +479,7 @@ function ApprovalCard({
 
   return (
     <div
-      className="border-t border-white/[0.10] bg-white/[0.04] px-3 py-2.5"
+      className="min-w-0 max-w-full overflow-hidden border-t border-white/[0.10] bg-white/[0.04] px-3 py-2.5"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-white/55">
@@ -498,7 +498,7 @@ function ApprovalCard({
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") handleApprove();
             }}
             rows={Math.min(6, Math.max(2, editedCmd.split("\n").length))}
-            className="w-full resize-none rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-white outline-none focus:border-white/25"
+            className="w-full max-w-full resize-none rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-white outline-none focus:border-white/25"
             spellCheck={false}
             autoFocus
           />
@@ -507,7 +507,7 @@ function ApprovalCard({
               value={editedCwd}
               onChange={(e) => setEditedCwd(e.target.value)}
               placeholder="工作目录（可选，缺省 = $HOME）"
-              className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 font-mono text-[11px] text-white outline-none focus:border-white/25"
+              className="w-full max-w-full rounded-md border border-white/10 bg-black/40 px-2 py-1 font-mono text-[11px] text-white outline-none focus:border-white/25"
             />
           )}
           <button
@@ -521,7 +521,7 @@ function ApprovalCard({
       ) : (
         <pre
           onClick={() => setEditing(true)}
-          className="cursor-text rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-white/90"
+          className="max-w-full cursor-text overflow-auto whitespace-pre-wrap break-all rounded-md border border-white/10 bg-black/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-white/90"
           title="点击修改"
         >
           {originalCmd || "(空命令)"}
