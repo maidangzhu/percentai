@@ -4,7 +4,7 @@ import { authPrisma } from "../auth/db.js";
 const newId = () => randomUUID();
 
 // 新用户初始赠送的点数
-export const SIGNUP_BONUS = 2000;
+export const SIGNUP_BONUS = 100;
 
 // Credit 消费原因常量
 export const CreditReason = {

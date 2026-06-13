@@ -20,6 +20,7 @@ import {
 import type { AgentMessage, AgentSessionSummary } from "@/bubble/ChatPanel";
 import { logInfo, logError, newTraceId as logNewTraceId } from "@/lib/logger";
 import { recordAiEvent } from "@/lib/aiEvents";
+import { canUseAiCredits, useAiCreditsAvailable } from "@/lib/creditsGate";
 import {
   listAgentSessions,
   getAgentSession,
@@ -83,9 +84,11 @@ export interface UseChatWindowResult {
   onSend: (text: string) => Promise<void>;
   pendingApproval: { req: ApprovalRequest; resolve: (d: ApprovalDecision) => void } | null;
   onResolveApproval: (decision: ApprovalDecision) => void;
+  aiDisabled: boolean;
 }
 
 export function useChatWindow(): UseChatWindowResult {
+  const aiCreditsAvailable = useAiCreditsAvailable();
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(
     () => {
       if (typeof localStorage === "undefined") return null;
@@ -253,6 +256,7 @@ export function useChatWindow(): UseChatWindowResult {
   const sendAgentMessage = useCallback(
     async (text: string) => {
       if (!text || agentLoading) return;
+      if (!(await canUseAiCredits())) return;
 
       const runId = `agent-${Date.now()}`;
       const traceId = logNewTraceId();
@@ -634,5 +638,6 @@ export function useChatWindow(): UseChatWindowResult {
     onSend: sendAgentMessage,
     pendingApproval,
     onResolveApproval: resolveApproval,
+    aiDisabled: !aiCreditsAvailable,
   };
 }

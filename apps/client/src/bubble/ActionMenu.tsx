@@ -7,10 +7,11 @@ export type ActionKey = "agent" | "reply" | "task" | "main";
 interface ActionMenuProps {
   onAction: (key: ActionKey) => void;
   busy: "agent" | "reply" | "task" | null;
+  aiDisabled?: boolean;
 }
 
 export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function ActionMenu(
-  { onAction, busy },
+  { onAction, busy, aiDisabled = false },
   ref
 ) {
   return (
@@ -36,18 +37,21 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
           title="问屏幕"
           onClick={() => onAction("agent")}
           loading={busy === "agent"}
+          disabled={aiDisabled}
         />
         <ActionItem
           icon={<MessageSquareQuote className="h-[13px] w-[13px]" strokeWidth={1.75} />}
           title="帮我回"
           onClick={() => onAction("reply")}
           loading={busy === "reply"}
+          disabled={aiDisabled}
         />
         <ActionItem
           icon={<ListTodo className="h-[13px] w-[13px]" strokeWidth={1.75} />}
           title="记任务"
           onClick={() => onAction("task")}
           loading={busy === "task"}
+          disabled={aiDisabled}
         />
       </ul>
       <div className="mx-3 my-1 h-px bg-white/[0.06]" />
@@ -69,28 +73,34 @@ function ActionItem({
   onClick,
   loading,
   muted,
+  disabled,
 }: {
   icon: React.ReactNode;
   title: string;
   onClick: () => void;
   loading?: boolean;
   muted?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <li>
       <button
         type="button"
         role="menuitem"
+        disabled={disabled}
         onClick={onClick}
         className={cn(
           "group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-[var(--duration-fast)]",
-          "hover:bg-white/[0.06] active:scale-[0.99]"
+          "hover:bg-white/[0.06] active:scale-[0.99]",
+          disabled && "cursor-not-allowed opacity-35 hover:bg-transparent active:scale-100"
         )}
       >
         <span
           className={cn(
             "grid h-6 w-6 shrink-0 place-items-center rounded-md border transition-colors duration-[var(--duration-fast)]",
-            muted
+            disabled
+              ? "border-white/[0.05] bg-white/[0.02] text-white/35"
+              : muted
               ? "border-white/[0.08] bg-white/[0.04] text-white/60 group-hover:text-white"
               : "border-white/[0.08] bg-white/[0.04] text-white/90 group-hover:bg-white group-hover:text-black group-hover:border-white"
           )}

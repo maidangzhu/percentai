@@ -50,7 +50,7 @@ test("calculateCredits rounds up partial tokens", () => {
   assert.equal(calculateCredits({}), 1);
 });
 
-test("ensureSignupBonus grants 2000 on first call, no-op on second", async () => {
+test("ensureSignupBonus grants SIGNUP_BONUS on first call, no-op on second", async () => {
   const userId = uniqueUserId("signup");
   try {
     assert.equal(await getBalance(userId), 0, "new user starts with 0");

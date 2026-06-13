@@ -14,6 +14,7 @@ import { WelcomeView } from "@/views/WelcomeView";
 import { LoadingView } from "@/views/LoadingView";
 import { AUTH_BASE } from "@/lib/types";
 import { authFetch, setAuthToken } from "@/lib/auth";
+import { clearCreditSnapshot, saveCreditSnapshot } from "@/lib/creditsGate";
 import {
   useLogs,
   usePeople,
@@ -136,6 +137,11 @@ export default function MainWindow() {
 
   // 事件监听：外部事件触发时 invalidate 相关 query
   useEffect(() => {
+    if (!authUser?.id || typeof creditsQuery.data?.balance !== "number") return;
+    saveCreditSnapshot(authUser.id, creditsQuery.data.balance);
+  }, [authUser?.id, creditsQuery.data?.balance]);
+
+  useEffect(() => {
     if (!authUser) return;
 
     void loadPermissions(true);
@@ -177,6 +183,7 @@ export default function MainWindow() {
       console.error("[auth] sign out failed:", e);
     } finally {
       setAuthToken(null);
+      clearCreditSnapshot();
       setAuthUser(null);
       setActiveKey("home");
     }

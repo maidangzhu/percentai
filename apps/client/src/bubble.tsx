@@ -25,6 +25,7 @@ import { db } from "@/db/client";
 import { newSnowflakeId } from "@/lib/snowflake";
 import { logInfo, logWarn, logError, newTraceId as logNewTraceId } from "@/lib/logger";
 import { callAnalyze, callSuggest } from "@/lib/llm";
+import { canUseAiCredits, useAiCreditsAvailable } from "@/lib/creditsGate";
 
 function serializeError(e: unknown) {
   if (e instanceof Error) return { name: e.name, message: e.message, stack: e.stack };
@@ -491,6 +492,7 @@ export default function Bubble() {
   const [isDragging, setIsDragging] = useState(false);
   const [autoCreateOnCountdown, setAutoCreateOnCountdown] = useState<boolean>(() => isTaskAutoCreateEnabled());
   const [suggestionCopied, setSuggestionCopied] = useState(false);
+  const aiCreditsAvailable = useAiCreditsAvailable();
 
   // 派生：进队列的 progress 决定 bubble 是不是 busy（之前是顶层 busyAction state）
   const busyAction = active?.kind === "progress" ? active.action : null;
@@ -672,8 +674,11 @@ export default function Bubble() {
       animatePulse();
     });
     const unlistenEnter = listen<EnterEvent>("enter-pressed", (e) => {
-      processEnterEvent(e.payload, displayTaskCandidate, displayDedupSuppressed, (id, name) => {
-        enqueue({ kind: "toast_person_added", personId: id, name, durationMs: 3000 });
+      canUseAiCredits().then((allowed) => {
+        if (!allowed) return;
+        return processEnterEvent(e.payload, displayTaskCandidate, displayDedupSuppressed, (id, name) => {
+          enqueue({ kind: "toast_person_added", personId: id, name, durationMs: 3000 });
+        });
       }).catch((err) =>
         console.error("[bubble] pipeline error:", err)
       );
@@ -845,6 +850,7 @@ export default function Bubble() {
 
   const generateReplySuggestion = async () => {
     if (isBusy) return;
+    if (!(await canUseAiCredits())) return;
     setActionMenuOpen(false);
     const progressId = enqueue({ kind: "progress", action: "reply" });
     const traceId = logNewTraceId();
@@ -1044,6 +1050,7 @@ export default function Bubble() {
 
   const captureTaskCandidate = async () => {
     if (isBusy) return;
+    if (!(await canUseAiCredits())) return;
     setActionMenuOpen(false);
     const progressId = enqueue({ kind: "progress", action: "task" });
     const traceId = logNewTraceId();
@@ -1189,9 +1196,13 @@ export default function Bubble() {
   }, [actionMenuOpen]);
 
   const handleActionMenu = (key: ActionKey) => {
+    if (key !== "main" && !aiCreditsAvailable) return;
     switch (key) {
       case "agent":
-        void invoke("show_chat_window").catch((e) =>
+        void canUseAiCredits().then((allowed) => {
+          if (!allowed) return;
+          return invoke("show_chat_window");
+        }).catch((e) =>
           console.error("[bubble] show_chat_window failed:", e)
         );
         break;
@@ -1228,7 +1239,12 @@ export default function Bubble() {
       ref={containerRef}
     >
       {actionMenuOpen && !isBusy && !isDragging && (
-        <ActionMenu ref={actionMenuRef} onAction={handleActionMenu} busy={busyAction} />
+        <ActionMenu
+          ref={actionMenuRef}
+          onAction={handleActionMenu}
+          busy={busyAction}
+          aiDisabled={!aiCreditsAvailable}
+        />
       )}
 
       {active?.kind === "progress" && progressCopy && (

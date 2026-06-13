@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AUTH_BASE } from "@/lib/types";
+import { API_BASE, AUTH_BASE } from "@/lib/types";
 import { authFetch, rememberAuthTokenFromResponse } from "@/lib/auth";
+import { refreshCreditSnapshot } from "@/lib/creditsGate";
 import type { AuthUser } from "@/lib/types";
 
 export function AuthView({
@@ -56,12 +57,28 @@ export function AuthView({
       rememberAuthTokenFromResponse(resp, body);
       const user = body?.user as AuthUser | undefined;
       if (user) {
+        if (mode === "register") {
+          await authFetch(`${API_BASE}/credits/ensure-signup-bonus`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: user.id }),
+          }).catch(() => undefined);
+        }
+        await refreshCreditSnapshot().catch(() => undefined);
         onAuthenticated(user);
         return;
       }
       const sessionResp = await authFetch(`${AUTH_BASE}/get-session`);
       const session = (await sessionResp.json().catch(() => null)) as { user?: AuthUser } | null;
       if (!session?.user) throw new Error("Signed in, but no session was returned.");
+      if (mode === "register") {
+        await authFetch(`${API_BASE}/credits/ensure-signup-bonus`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: session.user.id }),
+        }).catch(() => undefined);
+      }
+      await refreshCreditSnapshot().catch(() => undefined);
       onAuthenticated(session.user);
     } catch (e) {
       console.error("[auth] submit failed:", e);

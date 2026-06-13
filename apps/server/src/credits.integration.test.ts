@@ -20,6 +20,19 @@ function buildAuthStub(userId = "test-admin-user") {
   };
 }
 
+function buildSignupAuthStub(userId: string) {
+  return {
+    handler: () =>
+      new Response(JSON.stringify({ user: { id: userId, email: `${userId}@example.com` } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    api: {
+      getSession: async () => null,
+    },
+  };
+}
+
 async function cleanupUser(userId: string) {
   await authPrisma.creditTransaction.deleteMany({ where: { userId } });
   await authPrisma.userCredit.deleteMany({ where: { userId } });
@@ -32,6 +45,24 @@ test("credits routes require auth", async () => {
   });
   const resp = await app.request("/credits/balance/any-user");
   assert.equal(resp.status, 401);
+});
+
+test("POST /api/auth/sign-up/email automatically grants signup bonus", async () => {
+  const userId = uniqueUserId("signup-auth");
+  const app = await createApp(buildSignupAuthStub(userId) as Parameters<typeof createApp>[0]);
+  try {
+    const resp = await app.request("/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: `${userId}@example.com`, password: "password123", name: "Test" }),
+    });
+    assert.equal(resp.status, 200);
+    assert.equal(await authPrisma.userCredit.count({ where: { userId } }), 1);
+    const balance = await authPrisma.userCredit.findUnique({ where: { userId } });
+    assert.equal(balance?.balance, SIGNUP_BONUS);
+  } finally {
+    await cleanupUser(userId);
+  }
 });
 
 test("GET /credits/balance/:userId returns 0 for new user, then SIGNUP_BONUS after ensure", async () => {
@@ -66,7 +97,7 @@ test("POST /credits/adjust grants and deducts correctly", async () => {
   try {
     // 先确保账户存在（不调 ensure-signup-bonus 的话会 500，因为 adjust 内部要求账户已存在）
     await ensureSignupBonus(userId);
-    // 初始余额 = SIGNUP_BONUS（2000）
+    // 初始余额 = SIGNUP_BONUS
     const initial = await app.request(`/credits/balance/${userId}`);
     const initialBody = (await initial.json()) as { data: { balance: number } };
     assert.equal(initialBody.data.balance, SIGNUP_BONUS);

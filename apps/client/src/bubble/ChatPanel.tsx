@@ -51,6 +51,7 @@ interface ChatPanelProps {
   messagesRef?: React.RefObject<HTMLDivElement | null>;
   pendingApproval: { req: ApprovalRequest; resolve: (d: ApprovalDecision) => void } | null;
   onResolveApproval: (decision: ApprovalDecision) => void;
+  aiDisabled?: boolean;
   /**
    * "embedded"（默认）：bubble 内的浮窗。需要 drag handle + 绝对定位。
    * "standalone"：独立 Tauri 窗口（chat window）。无 drag handle，填满父容器。
@@ -83,6 +84,7 @@ export function ChatPanel({
   messagesRef,
   pendingApproval,
   onResolveApproval,
+  aiDisabled = false,
   mode = "embedded",
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
@@ -115,7 +117,7 @@ export function ChatPanel({
 
   const handleSubmit = () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || aiDisabled) return;
     onSend(text);
     setInput("");
   };
@@ -334,13 +336,14 @@ export function ChatPanel({
             }
           }}
           placeholder="问屏幕任何事…"
+          disabled={aiDisabled}
           autoFocus
         />
         <button
           type="submit"
           aria-label="Send"
           className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-white text-black transition-opacity disabled:opacity-30"
-          disabled={!input.trim() || loading}
+          disabled={!input.trim() || loading || aiDisabled}
         >
           <Send className="h-3 w-3" strokeWidth={2} />
         </button>

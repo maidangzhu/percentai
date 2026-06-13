@@ -10,6 +10,8 @@ import { gatewayErrorHandler, responseGateway } from "./middleware/responseGatew
 import { agentStreamRouter } from "./routes/agentStream.js";
 import { chatRouter } from "./routes/chat.js";
 import { creditsRouter } from "./routes/credits.js";
+import { ensureSignupBonus } from "./lib/credits.js";
+import { logError } from "./lib/appLogger.js";
 
 type AppAuth = Parameters<typeof authGuard>[0] & {
   handler: (request: Request) => Response | Promise<Response>;
@@ -55,7 +57,32 @@ export function createApp(auth: AppAuth) {
     })
   );
   app.use("*", apiLogger());
-  app.all("/api/auth/*", async (c) => auth.handler(await toBufferedRequest(c)));
+  app.all("/api/auth/*", async (c) => {
+    const response = await auth.handler(await toBufferedRequest(c));
+    if (c.req.method === "POST" && c.req.path === "/api/auth/sign-up/email" && response.ok) {
+      const responseBody = await response.arrayBuffer();
+      let body: { user?: { id?: string } } | null = null;
+      try {
+        body = JSON.parse(new TextDecoder().decode(responseBody)) as { user?: { id?: string } };
+      } catch (error) {
+        logError("credits.signup_bonus.parse_failed", { error });
+      }
+      const userId = body?.user?.id;
+      if (userId) {
+        try {
+          await ensureSignupBonus(userId);
+        } catch (error) {
+          logError("credits.signup_bonus.failed", { user_id: userId, error });
+        }
+      }
+      return new Response(responseBody, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
+    return response;
+  });
   app.use("*", responseGateway());
   app.use("*", authGuard(auth));
 
