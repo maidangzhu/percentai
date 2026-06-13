@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { handle } from "hono/vercel";
+import { getRequestListener } from "@hono/node-server";
 
 import { auth } from "./auth/index.js";
 import { authGuard } from "./middleware/authGuard.js";
@@ -65,4 +65,4 @@ export function createApp(auth: AppAuth) {
 
 export const app = createApp(auth);
 
-export default handle(app);
+export default getRequestListener((request) => app.fetch(request));
