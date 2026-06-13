@@ -15,10 +15,12 @@ import { mock } from "node:test";
 
 let lastCompleteSimpleArgs: unknown = null;
 let lastCompleteSimpleOpts: unknown = null;
+let completeSimpleCallCount = 0;
 let nextCompleteResponse: { content: Array<{ type: "text"; text: string }> } = {
   content: [{ type: "text", text: "MOCK REPLY" }],
 };
 let completeShouldThrow: Error | null = null;
+let completeFailuresRemaining = 0;
 
 mock.module("@percent/runtime", {
   namedExports: {
@@ -33,8 +35,13 @@ mock.module("@percent/runtime", {
       args: unknown,
       opts: unknown,
     ) => {
+      completeSimpleCallCount += 1;
       lastCompleteSimpleArgs = args;
       lastCompleteSimpleOpts = opts;
+      if (completeFailuresRemaining > 0) {
+        completeFailuresRemaining -= 1;
+        throw new Error("transient provider failure");
+      }
       if (completeShouldThrow) throw completeShouldThrow;
       return nextCompleteResponse;
     },
@@ -50,8 +57,10 @@ const { chatRouter } = await import("../routes/chat.js");
 function reset() {
   lastCompleteSimpleArgs = null;
   lastCompleteSimpleOpts = null;
+  completeSimpleCallCount = 0;
   nextCompleteResponse = { content: [{ type: "text", text: "MOCK REPLY" }] };
   completeShouldThrow = null;
+  completeFailuresRemaining = 0;
   delete process.env.LLM_API_KEY;
   delete process.env.KIMI_API_KEY;
   delete process.env.OPENAI_API_KEY;
@@ -191,6 +200,21 @@ test("returns 502 when the provider call throws", async () => {
   assert.equal(res.status, 502);
   const body = (await res.json()) as { data: { error: string } };
   assert.ok(body.data.error.includes("provider down"));
+  assert.equal(completeSimpleCallCount, 2);
+});
+
+test("retries the non-stream chat provider call once", async () => {
+  reset();
+  process.env.LLM_API_KEY = "sk";
+  completeFailuresRemaining = 1;
+  nextCompleteResponse = { content: [{ type: "text", text: "RETRY OK" }] };
+  const res = await postChat({
+    messages: [{ role: "user", content: "hi" }],
+  });
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { data: { text: string } };
+  assert.equal(body.data.text, "RETRY OK");
+  assert.equal(completeSimpleCallCount, 2);
 });
 
 test("folds top-level image_base64 into the first user message", async () => {

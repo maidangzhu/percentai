@@ -52,6 +52,7 @@ const requestSchema = z.object({
 type AppEnv = { Variables: { traceId?: string } };
 const app = new Hono<AppEnv>();
 const DEFAULT_LLM_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 2048);
+const LLM_RETRY_DELAY_MS = Number(process.env.LLM_RETRY_DELAY_MS ?? 300);
 
 function providerOptions(provider: string) {
   const options: { apiKey: string; maxTokens: number; temperature?: number } = {
@@ -64,6 +65,36 @@ function providerOptions(provider: string) {
     options.temperature = 1;
   }
   return options;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callLlmWithOneRetry<T>(
+  fn: () => Promise<T>,
+  context: {
+    traceId?: string;
+    provider: string;
+    modelId: string;
+    startedAt: number;
+  },
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    logError("chat.llm_retry", {
+      trace_id: context.traceId,
+      provider: context.provider,
+      model_id: context.modelId,
+      attempt: 1,
+      max_attempts: 2,
+      error: String(error),
+      duration_ms: elapsedMs(context.startedAt),
+    });
+    if (LLM_RETRY_DELAY_MS > 0) await sleep(LLM_RETRY_DELAY_MS);
+    return await fn();
+  }
 }
 
 app.post("/", async (c) => {
@@ -160,14 +191,17 @@ app.post("/", async (c) => {
   let text: string;
   try {
     if (isMoonshotKimi(body.provider, modelId, baseUrl, false)) {
-      const result = await completeMoonshotKimi({
-        apiKey,
-        baseUrl,
-        modelId,
-        systemPrompt: body.system_prompt,
-        messages: messages as MoonshotMessage[],
-        maxTokens: DEFAULT_LLM_MAX_TOKENS,
-      });
+      const result = await callLlmWithOneRetry(
+        () => completeMoonshotKimi({
+          apiKey,
+          baseUrl,
+          modelId,
+          systemPrompt: body.system_prompt,
+          messages: messages as MoonshotMessage[],
+          maxTokens: DEFAULT_LLM_MAX_TOKENS,
+        }),
+        { traceId, provider: body.provider, modelId, startedAt },
+      );
       text = result.text;
       logInfo("chat.ok", {
         trace_id: traceId,
@@ -181,10 +215,13 @@ app.post("/", async (c) => {
 
     const options = providerOptions(body.provider);
     options.apiKey = apiKey;
-    const result = await completeSimple(
-      model,
-      { systemPrompt: body.system_prompt, messages },
-      options,
+    const result = await callLlmWithOneRetry(
+      () => completeSimple(
+        model,
+        { systemPrompt: body.system_prompt, messages },
+        options,
+      ),
+      { traceId, provider: body.provider, modelId, startedAt },
     );
     text = (result.content ?? [])
       .filter((c): c is { type: "text"; text: string } => c.type === "text")
