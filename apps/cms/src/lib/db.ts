@@ -58,6 +58,7 @@ function normalizeUrl(value: string) {
   return value
     .trim()
     .replace(/^['"]|['"]$/g, "")
+    .replace(/^[A-Z0-9_]+\s*=\s*/i, "")
     .replace(/\\n/g, "")
     .replace(/\r?\n/g, "");
 }
