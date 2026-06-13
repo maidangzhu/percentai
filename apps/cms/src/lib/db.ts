@@ -46,7 +46,7 @@ if (!authConnectionString) {
 }
 
 function withSchema(url: string, schema: string) {
-  const parsed = new URL(url);
+  const parsed = new URL(url.trim());
   if (!parsed.searchParams.has("schema")) {
     parsed.searchParams.set("schema", schema);
   }
