@@ -159,7 +159,7 @@ app.post("/", async (c) => {
 
   let text: string;
   try {
-    if (isMoonshotKimi(body.provider, modelId, baseUrl)) {
+    if (isMoonshotKimi(body.provider, modelId, baseUrl, false)) {
       const result = await completeMoonshotKimi({
         apiKey,
         baseUrl,
