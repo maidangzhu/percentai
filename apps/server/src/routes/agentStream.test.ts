@@ -2,7 +2,7 @@
 // agent runtime (`streamPercentProxy` in @percent/runtime).
 //
 // We mock `@percent/runtime` so no real provider call is made. The test
-// verifies the request shape and the newline-delimited JSON response.
+// verifies the request shape and the Server-Sent Events response.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -103,7 +103,7 @@ test("streams each event as a Server-Sent Event line (data: ...\\n\\n)", async (
     { type: "start", partial: { role: "assistant", content: [] } },
     { type: "text_delta", contentIndex: 0, delta: "hello" },
     { type: "text_delta", contentIndex: 0, delta: " world" },
-    { type: "done", partial: { role: "assistant", content: [], stopReason: "stop" } },
+    { type: "done", reason: "stop", message: { role: "assistant", content: [], usage: null } },
   ];
   const res = await postStream({
     model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
@@ -137,11 +137,39 @@ test("passes agent tools through to the provider stream", async () => {
   reset();
   process.env.LLM_API_KEY = "sk";
   nextEvents = [
-    { type: "toolcall_start", contentIndex: 0, id: "call-1", toolName: "manage_chats" },
+    {
+      type: "toolcall_start",
+      contentIndex: 0,
+      partial: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call-1",
+            name: "manage_chats",
+            arguments: {},
+          },
+        ],
+      },
+    },
     { type: "toolcall_delta", contentIndex: 0, delta: "{\"action\":\"list\"" },
     { type: "toolcall_delta", contentIndex: 0, delta: ",\"person_name\":\"烽宁\"}" },
-    { type: "toolcall_end", contentIndex: 0 },
-    { type: "done", reason: "toolUse", message: { usage: null } },
+    {
+      type: "toolcall_end",
+      contentIndex: 0,
+      partial: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call-1",
+            name: "manage_chats",
+            arguments: { action: "list", person_name: "烽宁" },
+          },
+        ],
+      },
+    },
+    { type: "done", reason: "toolUse", message: { role: "assistant", content: [], usage: null } },
   ];
   const tools = [
     {
@@ -169,12 +197,14 @@ test("passes agent tools through to the provider stream", async () => {
   const events = text
     .split("\n")
     .filter((l) => l.startsWith("data: "))
-    .map((l) => JSON.parse(l.slice(6)) as { type: string; toolName?: string; delta?: string });
+    .map((l) => JSON.parse(l.slice(6)) as { type: string; id?: string; toolName?: string; partial?: unknown });
   assert.deepEqual(
     events.map((event) => event.type),
     ["toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_end", "done"],
   );
+  assert.equal(events[0].id, "call-1");
   assert.equal(events[0].toolName, "manage_chats");
+  assert.equal(events[0].partial, undefined);
 });
 
 test("emits a single error event when the provider stream throws", async () => {
@@ -194,17 +224,17 @@ test("emits a single error event when the provider stream throws", async () => {
   assert.equal(dataLines.length, 1);
   const parsed = JSON.parse(dataLines[0].slice(6)) as {
     type: string;
-    error: string;
+    errorMessage: string;
   };
   assert.equal(parsed.type, "error");
-  assert.ok(parsed.error.includes("provider blew up"));
+  assert.ok(parsed.errorMessage.includes("provider blew up"));
 });
 
 test("prefers per-provider env var over generic LLM_API_KEY", async () => {
   reset();
   process.env.LLM_API_KEY = "sk-generic";
   process.env.KIMI_API_KEY = "sk-kimi";
-  nextEvents = [{ type: "done", partial: { role: "assistant" } }];
+  nextEvents = [{ type: "done", reason: "stop", message: { role: "assistant", content: [], usage: null } }];
   const res = await postStream({
     model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
     context: { messages: [] },

@@ -2,17 +2,19 @@
 //
 // The client (`@percent/runtime`'s agent runtime) POSTs to
 // `${apiBase}/agent/model/stream` with body `{ model, context, options }`
-// and reads back newline-delimited JSON events. The server holds the
-// provider API key in env — never the client — and forwards the
-// streaming response from pi-ai to the client byte-for-byte.
+// and reads back Server-Sent Events. The server holds the provider API
+// key in env — never the client — and adapts pi-ai stream events to the
+// runtime's proxy protocol.
 
 import { Hono } from "hono";
 import { z } from "zod";
+import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
 import {
   buildProviderModel,
   PROVIDER_PRESETS,
   streamSimple,
   type Context,
+  type PercentProxyEvent,
   type ProviderId,
   type SimpleStreamOptions,
 } from "@percent/runtime";
@@ -46,6 +48,69 @@ const proxyBodySchema = z.object({
 
 type AppEnv = { Variables: { traceId?: string } };
 const app = new Hono<AppEnv>();
+
+const emptyUsage: AssistantMessage["usage"] = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+function toProxyEvent(event: AssistantMessageEvent): PercentProxyEvent | undefined {
+  switch (event.type) {
+    case "start":
+      return { type: "start" };
+    case "text_start":
+      return { type: "text_start", contentIndex: event.contentIndex };
+    case "text_delta":
+      return { type: "text_delta", contentIndex: event.contentIndex, delta: event.delta };
+    case "text_end": {
+      const content = event.partial.content[event.contentIndex];
+      return {
+        type: "text_end",
+        contentIndex: event.contentIndex,
+        contentSignature: content?.type === "text" ? content.textSignature : undefined,
+      };
+    }
+    case "thinking_start":
+      return { type: "thinking_start", contentIndex: event.contentIndex };
+    case "thinking_delta":
+      return { type: "thinking_delta", contentIndex: event.contentIndex, delta: event.delta };
+    case "thinking_end": {
+      const content = event.partial.content[event.contentIndex];
+      return {
+        type: "thinking_end",
+        contentIndex: event.contentIndex,
+        contentSignature: content?.type === "thinking" ? content.thinkingSignature : undefined,
+      };
+    }
+    case "toolcall_start": {
+      const content = event.partial.content[event.contentIndex];
+      if (content?.type !== "toolCall") return undefined;
+      return {
+        type: "toolcall_start",
+        contentIndex: event.contentIndex,
+        id: content.id,
+        toolName: content.name,
+      };
+    }
+    case "toolcall_delta":
+      return { type: "toolcall_delta", contentIndex: event.contentIndex, delta: event.delta };
+    case "toolcall_end":
+      return { type: "toolcall_end", contentIndex: event.contentIndex };
+    case "done":
+      return { type: "done", reason: event.reason, usage: event.message.usage };
+    case "error":
+      return {
+        type: "error",
+        reason: event.reason,
+        errorMessage: event.error.errorMessage,
+        usage: event.error.usage,
+      };
+  }
+}
 
 app.post("/model/stream", async (c) => {
   const startedAt = Date.now();
@@ -97,10 +162,10 @@ app.post("/model/stream", async (c) => {
     return c.json({ code: 400, message: `unknown provider: ${provider}` }, 400);
   }
 
-  // streamSimple(model, context, options) returns an
-  // AssistantMessageEventStream — an async iterable of `start`,
-  // `text_start`/`text_delta`, `done`, `error` events. We relay each
-  // event to the client as one JSON object per line.
+  // streamSimple(model, context, options) returns pi-ai's raw
+  // AssistantMessageEventStream. The desktop runtime consumes the
+  // narrower PercentProxyEvent protocol, so we convert before writing
+  // each event to SSE.
   const stream = streamSimple(modelObj, context as Context, {
     ...(options as SimpleStreamOptions),
     apiKey,
@@ -118,7 +183,8 @@ app.post("/model/stream", async (c) => {
         controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
       try {
         for await (const ev of stream) {
-          write(ev);
+          const proxyEvent = toProxyEvent(ev);
+          if (proxyEvent) write(proxyEvent);
         }
         logInfo("agent_stream.ok", {
           trace_id: traceId,
@@ -134,7 +200,12 @@ app.post("/model/stream", async (c) => {
           error: String(e),
           duration_ms: elapsedMs(startedAt),
         });
-        write({ type: "error", error: String(e) });
+        write({
+          type: "error",
+          reason: "error",
+          errorMessage: e instanceof Error ? e.message : String(e),
+          usage: emptyUsage,
+        } satisfies PercentProxyEvent);
       } finally {
         controller.close();
       }
