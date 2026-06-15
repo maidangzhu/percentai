@@ -82,6 +82,7 @@ coverage
 # Misc
 *.local
 .vercel
+.wrangler
 
 # PPT generated images (not to be committed)
 docs/ppt/images/

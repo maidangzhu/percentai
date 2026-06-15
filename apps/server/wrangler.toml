@@ -1,0 +1,16 @@
+name = "percent-server"
+main = "src/worker.ts"
+compatibility_date = "2026-06-14"
+compatibility_flags = ["nodejs_compat"]
+minify = true
+
+[vars]
+NODE_ENV = "production"
+WORKERS_ENV = "1"
+MOONSHOT_NATIVE_PROXY = "1"
+AUTH_DATABASE_SCHEMA = "auth"
+BETTER_AUTH_URL = "https://api-test.thepercentai.com"
+
+[observability.logs]
+enabled = false
+invocation_logs = true

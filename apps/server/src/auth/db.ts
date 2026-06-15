@@ -2,11 +2,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { PrismaNeon } from "@prisma/adapter-neon";
-import { PrismaClient } from "../generated/auth-prisma/client.js";
+import { PrismaClient as PrismaEdgeClient } from "../generated/auth-prisma/edge.js";
+import { PrismaClient as PrismaNodeClient } from "../generated/auth-prisma/client.js";
 
-const authDir = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(authDir, "../../.env") });
-dotenv.config({ path: path.resolve(authDir, "../../../../.env") });
+if (typeof process !== "undefined" && process.env["WORKERS_ENV"] !== "1") {
+  const authDir = path.dirname(fileURLToPath(import.meta.url));
+  dotenv.config({ path: path.resolve(authDir, "../../.env") });
+  dotenv.config({ path: path.resolve(authDir, "../../../../.env") });
+}
 
 const authDatabaseSchema = process.env["AUTH_DATABASE_SCHEMA"] ?? "auth";
 const connectionString =
@@ -30,6 +33,8 @@ const adapter = new PrismaNeon(
   { connectionString: withDatabaseSchema(connectionString, authDatabaseSchema) },
   { schema: authDatabaseSchema }
 );
+
+const PrismaClient = process.env["WORKERS_ENV"] === "1" ? PrismaEdgeClient : PrismaNodeClient;
 
 export const authPrisma = new PrismaClient({
   adapter,

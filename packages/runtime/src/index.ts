@@ -33,6 +33,7 @@ import {
   Agent,
   type AgentMessage,
   type AgentTool,
+  type ThinkingLevel,
   type StreamFn,
 } from "@earendil-works/pi-agent-core";
 import {
@@ -59,33 +60,27 @@ export interface PercentModelOptions {
   id?: string;
   name?: string;
   baseUrl?: string;
+  provider?: string;
+  reasoning?: boolean;
 }
 
 export function createPercentModel(options: PercentModelOptions = {}): Model<"openai-completions"> {
   return {
-    id: options.id ?? "kimi-k2.6",
-    name: options.name ?? "Kimi K2.6",
+    id: options.id ?? "gpt-5.5",
+    name: options.name ?? options.id ?? "GPT 5.5",
     api: "openai-completions",
-    provider: "moonshotai-cn",
-    baseUrl: options.baseUrl ?? "https://api.moonshot.cn/v1",
-    compat: {
-      supportsStore: false,
-      supportsDeveloperRole: false,
-      supportsReasoningEffort: false,
-      maxTokensField: "max_tokens",
-      supportsStrictMode: false,
-      thinkingFormat: "deepseek",
-    },
-    reasoning: true,
+    provider: options.provider ?? "openai",
+    baseUrl: options.baseUrl ?? "https://api.openai.com/v1",
+    reasoning: options.reasoning ?? false,
     input: ["text", "image"],
     cost: {
-      input: 0.95,
-      output: 4,
-      cacheRead: 0.16,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
       cacheWrite: 0,
     },
-    contextWindow: 262144,
-    maxTokens: 262144,
+    contextWindow: 128000,
+    maxTokens: 16384,
   };
 }
 
@@ -351,7 +346,7 @@ export interface CreatePercentAgentOptions {
   messages?: AgentMessage[];
   /**
    * 默认 model（proxy 路径下用）。BYOK 路径下用 `model` 字段。
-   * 缺省用 kimi-k2.6。
+   * 缺省用服务端配置的 OpenAI-compatible 主链路。
    */
   model?: Model<any>;
   /**
@@ -362,6 +357,7 @@ export interface CreatePercentAgentOptions {
   mode?: "proxy" | "direct";
   byokApiKey?: string;
   authToken?: string;
+  thinkingLevel?: ThinkingLevel;
 }
 
 export function createPercentAgent(options: CreatePercentAgentOptions): Agent {
@@ -384,7 +380,7 @@ export function createPercentAgent(options: CreatePercentAgentOptions): Agent {
     initialState: {
       model,
       systemPrompt: options.systemPrompt,
-      thinkingLevel: "medium",
+      thinkingLevel: options.thinkingLevel ?? "off",
       tools: options.tools,
       messages: options.messages ?? [],
     },

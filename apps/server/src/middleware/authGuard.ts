@@ -18,7 +18,7 @@ declare module "hono" {
 }
 
 function isPublicPath(path: string) {
-  return path === "/health" || path.startsWith("/api/auth/");
+  return path === "/health" || path.startsWith("/api/auth/") || path === "/credits/config";
 }
 
 const SESSION_CACHE_TTL_MS = Number(process.env.AUTH_SESSION_CACHE_TTL_MS ?? 15_000);

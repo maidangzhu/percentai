@@ -12,10 +12,13 @@ import { mock } from "node:test";
 let nextEvents: Array<Record<string, unknown>> = [];
 let streamShouldThrow: Error | null = null;
 let lastStreamContext: unknown = null;
+let lastBuildProviderModelInput: unknown = null;
+let lastStreamOptions: unknown = null;
 
 mock.module("@percent/runtime", {
   namedExports: {
     buildProviderModel: (input: { provider: string; modelId: string; baseUrl?: string }) => {
+      lastBuildProviderModelInput = input;
       if (input.provider === "no-such-provider") {
         throw new Error(`unknown provider: ${input.provider}`);
       }
@@ -26,19 +29,20 @@ mock.module("@percent/runtime", {
         api: "openai-completions",
       };
     },
-    streamSimple: async function* (_model: unknown, context: unknown) {
+    streamSimple: async function* (_model: unknown, context: unknown, options: unknown) {
       lastStreamContext = context;
+      lastStreamOptions = options;
       if (streamShouldThrow) throw streamShouldThrow;
       for (const ev of nextEvents) {
         yield ev;
       }
     },
     PROVIDER_PRESETS: {
-      kimi: {
-        id: "kimi",
-        baseUrl: "https://api.moonshot.cn/v1",
-        defaultModelId: "kimi-k2.6",
-        defaultModelName: "Kimi K2.6",
+      openai: {
+        id: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        defaultModelId: "gpt-5.5",
+        defaultModelName: "GPT 5.5",
       },
     },
   },
@@ -50,8 +54,17 @@ function reset() {
   nextEvents = [];
   streamShouldThrow = null;
   lastStreamContext = null;
+  lastBuildProviderModelInput = null;
+  lastStreamOptions = null;
   delete process.env.LLM_API_KEY;
+  delete process.env.LLM_PROVIDER;
+  delete process.env.LLM_MODEL_ID;
+  delete process.env.LLM_BASE_URL;
+  delete process.env.LLM_BACKUP_API_KEY;
+  delete process.env.LLM_BACKUP_MODEL_ID;
+  delete process.env.LLM_BACKUP_BASE_URL;
   delete process.env.KIMI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
 }
 
 async function postStream(body: unknown): Promise<Response> {
@@ -72,22 +85,23 @@ test("rejects missing model with 400", async () => {
 test("returns 500 when no api key is configured", async () => {
   reset();
   const res = await postStream({
-    model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
+    model: { id: "gpt-5.5", provider: "openai", api: "openai-completions" },
     context: { messages: [] },
     options: {},
   });
   assert.equal(res.status, 500);
   const body = (await res.json()) as { message: string };
-  assert.ok(body.message.includes("kimi"));
+  assert.ok(body.message.includes("openai"));
 });
 
 test("returns 400 for an unknown provider", async () => {
   reset();
   process.env.LLM_API_KEY = "sk";
+  process.env.LLM_PROVIDER = "no-such-provider";
   const res = await postStream({
     model: {
       id: "m",
-      provider: "no-such-provider",
+      provider: "openai",
       api: "openai-completions",
     },
     context: { messages: [] },
@@ -106,7 +120,7 @@ test("streams each event as a Server-Sent Event line (data: ...\\n\\n)", async (
     { type: "done", reason: "stop", message: { role: "assistant", content: [], usage: null } },
   ];
   const res = await postStream({
-    model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
+    model: { id: "gpt-5.5", provider: "openai", api: "openai-completions" },
     context: { messages: [] },
     options: {},
   });
@@ -186,7 +200,7 @@ test("passes agent tools through to the provider stream", async () => {
     },
   ];
   const res = await postStream({
-    model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
+    model: { id: "gpt-5.5", provider: "openai", api: "openai-completions" },
     context: { messages: [], tools },
     options: {},
   });
@@ -212,7 +226,7 @@ test("emits a single error event when the provider stream throws", async () => {
   process.env.LLM_API_KEY = "sk";
   streamShouldThrow = new Error("provider blew up");
   const res = await postStream({
-    model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
+    model: { id: "gpt-5.5", provider: "openai", api: "openai-completions" },
     context: { messages: [] },
     options: {},
   });
@@ -233,149 +247,39 @@ test("emits a single error event when the provider stream throws", async () => {
 test("prefers per-provider env var over generic LLM_API_KEY", async () => {
   reset();
   process.env.LLM_API_KEY = "sk-generic";
-  process.env.KIMI_API_KEY = "sk-kimi";
+  process.env.OPENAI_API_KEY = "sk-openai";
   nextEvents = [{ type: "done", reason: "stop", message: { role: "assistant", content: [], usage: null } }];
   const res = await postStream({
-    model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
+    model: { id: "gpt-5.5", provider: "openai", api: "openai-completions" },
     context: { messages: [] },
     options: {},
   });
   assert.equal(res.status, 200);
+  const opts = lastStreamOptions as { apiKey: string };
+  assert.equal(opts.apiKey, "sk-openai");
 });
 
-test("falls back to backup model for native Kimi stream without changing request shape", async () => {
+test("uses server LLM config even when the client sends an old Kimi model", async () => {
   reset();
-  process.env.NODE_ENV = "production";
-  process.env.MOONSHOT_NATIVE_PROXY = "1";
-  process.env.KIMI_API_KEY = "sk-kimi";
-  process.env.LLM_BACKUP_API_KEY = "sk-backup";
-  process.env.LLM_BACKUP_BASE_URL = "https://backup.example.com/v1";
-  const requestedUrls: string[] = [];
-  const requestBodies: Array<Record<string, unknown>> = [];
-  const fetchMock = mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
-    requestedUrls.push(String(url));
-    requestBodies.push(JSON.parse(String(init?.body)));
-    if (String(url).includes("moonshot")) {
-      throw new Error("moonshot stream down");
-    }
-    return new Response(
-      [
-        "data: {\"choices\":[{\"delta\":{\"content\":\"backup\"}}]}\n\n",
-        "data: {\"choices\":[{\"delta\":{\"content\":\" stream\"}}]}\n\n",
-        "data: [DONE]\n\n",
-      ].join(""),
-      { status: 200, headers: { "Content-Type": "text/event-stream" } },
-    );
+  process.env.LLM_API_KEY = "sk-main";
+  process.env.LLM_PROVIDER = "openai";
+  process.env.LLM_MODEL_ID = "gpt-5.5";
+  process.env.LLM_BASE_URL = "https://backup.example.com/v1";
+  nextEvents = [{ type: "done", reason: "stop", message: { role: "assistant", content: [], usage: null } }];
+  const res = await postStream({
+    model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions", baseUrl: "https://api.moonshot.cn/v1" },
+    context: { messages: [{ role: "user", content: "hi" }] },
+    options: { maxTokens: 64, reasoning: true },
   });
-
-  try {
-    const res = await postStream({
-      model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
-      context: {
-        systemPrompt: "You are helpful.",
-        messages: [{ role: "user", content: "hi" }],
-      },
-      options: { maxTokens: 64 },
-    });
-    assert.equal(res.status, 200);
-    const text = await res.text();
-    const events = text
-      .split("\n")
-      .filter((line) => line.startsWith("data: "))
-      .map((line) => JSON.parse(line.slice(6)) as { type: string; delta?: string });
-    assert.deepEqual(requestedUrls, [
-      "https://api.moonshot.cn/v1/chat/completions",
-      "https://backup.example.com/v1/chat/completions",
-    ]);
-    assert.equal(requestBodies[0].model, "kimi-k2.6");
-    assert.equal(requestBodies[0].stream, true);
-    assert.equal(requestBodies[1].model, "gpt-5.5");
-    assert.equal(requestBodies[1].stream, true);
-    assert.deepEqual(
-      events.map((event) => event.type),
-      ["start", "text_start", "text_delta", "text_delta", "text_end", "done"],
-    );
-    assert.equal(events[2].delta, "backup");
-    assert.equal(events[3].delta, " stream");
-  } finally {
-    fetchMock.mock.restore();
-    delete process.env.MOONSHOT_NATIVE_PROXY;
-    delete process.env.LLM_BACKUP_API_KEY;
-    delete process.env.LLM_BACKUP_BASE_URL;
-    process.env.NODE_ENV = "test";
-  }
-});
-
-test("enables Kimi thinking for ask-screen native stream when reasoning is requested", async () => {
-  reset();
-  process.env.NODE_ENV = "production";
-  process.env.MOONSHOT_NATIVE_PROXY = "1";
-  process.env.KIMI_API_KEY = "sk-kimi";
-  let requestBody: Record<string, unknown> | null = null;
-  const fetchMock = mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
-    requestBody = JSON.parse(String(init?.body));
-    return new Response("data: [DONE]\n\n", {
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
-    });
+  assert.equal(res.status, 200);
+  await res.text();
+  assert.deepEqual(lastBuildProviderModelInput, {
+    provider: "openai",
+    modelId: "gpt-5.5",
+    baseUrl: "https://backup.example.com/v1",
   });
-
-  try {
-    const res = await postStream({
-      model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
-      context: { messages: [{ role: "user", content: "hi" }] },
-      options: { reasoning: true },
-    });
-    assert.equal(res.status, 200);
-    await res.text();
-    assert.ok(requestBody);
-    assert.deepEqual((requestBody as Record<string, unknown>).thinking, { type: "enabled" });
-  } finally {
-    fetchMock.mock.restore();
-    delete process.env.MOONSHOT_NATIVE_PROXY;
-    process.env.NODE_ENV = "test";
-  }
-});
-
-test("passes agent tools into native Kimi stream requests", async () => {
-  reset();
-  process.env.NODE_ENV = "production";
-  process.env.MOONSHOT_NATIVE_PROXY = "1";
-  process.env.KIMI_API_KEY = "sk-kimi";
-  let requestBody: Record<string, unknown> | null = null;
-  const fetchMock = mock.method(globalThis, "fetch", async (_url: string | URL | Request, init?: RequestInit) => {
-    requestBody = JSON.parse(String(init?.body));
-    return new Response("data: [DONE]\n\n", {
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
-    });
-  });
-
-  try {
-    const res = await postStream({
-      model: { id: "kimi-k2.6", provider: "kimi", api: "openai-completions" },
-      context: {
-        messages: [{ role: "user", content: "hi" }],
-        tools: [
-          {
-            name: "manage_chats",
-            description: "Read chats.",
-            parameters: { type: "object", properties: {} },
-          },
-        ],
-      },
-      options: { reasoning: true },
-    });
-    assert.equal(res.status, 200);
-    await res.text();
-    assert.ok(requestBody);
-    const tools = (requestBody as { tools?: Array<{ type?: string; function?: { name?: string } }> }).tools;
-    assert.equal(tools?.[0]?.type, "function");
-    assert.equal(tools?.[0]?.function?.name, "manage_chats");
-    assert.equal((requestBody as { tool_choice?: string }).tool_choice, "auto");
-  } finally {
-    fetchMock.mock.restore();
-    delete process.env.MOONSHOT_NATIVE_PROXY;
-    process.env.NODE_ENV = "test";
-  }
+  const opts = lastStreamOptions as { apiKey: string; maxTokens: number; reasoning?: unknown };
+  assert.equal(opts.apiKey, "sk-main");
+  assert.equal(opts.maxTokens, 64);
+  assert.equal(opts.reasoning, true);
 });

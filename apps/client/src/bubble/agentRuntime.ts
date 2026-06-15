@@ -164,8 +164,8 @@ export function uiMessagesToRuntimeMessages(messages: Array<{ role: "user" | "as
         content: [{ type: "text", text: message.content }],
         timestamp: Date.now(),
         api: "openai-completions",
-        provider: "moonshotai-cn",
-        model: "kimi-k2.6",
+        provider: "openai",
+        model: "gpt-5.5",
         usage: {
           input: 0,
           output: 0,

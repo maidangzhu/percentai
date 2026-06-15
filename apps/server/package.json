@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "pnpm run auth:generate && tsx watch src/_server.ts",
     "test": "tsx --test --test-concurrency=1 --experimental-test-module-mocks $(find src -name '*.test.ts' -type f)",
+    "test:llm-live": "tsx --test --test-concurrency=1 src/lib/llm-live.test.mts",
+    "test:cf-live": "tsx --test --test-concurrency=1 src/lib/cloudflare-live.test.mts",
+    "bench:serverless": "tsx src/lib/serverless-compare.mts",
     "start": "node dist/_server.js",
     "build": "pnpm run auth:generate && tsc && mkdir -p dist/generated && cp -R src/generated/. dist/generated/",
     "auth:db:push": "prisma db push --config prisma-auth.config.ts",

@@ -15,11 +15,10 @@ import {
   streamSimple,
   type Context,
   type PercentProxyEvent,
-  type ProviderId,
   type SimpleStreamOptions,
 } from "@percent/runtime";
 import { elapsedMs, logError, logInfo } from "../lib/appLogger.js";
-import { isMoonshotKimi, streamMoonshotKimi, type MoonshotMessage } from "../lib/moonshot.js";
+import { getLlmConfig } from "../lib/llmConfig.js";
 
 // The `model` field coming over the wire carries enough for the server
 // to re-build the model via `buildProviderModel` (provider, modelId,
@@ -50,7 +49,6 @@ const proxyBodySchema = z.object({
 type AppEnv = { Variables: { traceId?: string } };
 const app = new Hono<AppEnv>();
 const DEFAULT_AGENT_MAX_TOKENS = Number(process.env.AGENT_MAX_TOKENS ?? 4096);
-const LLM_BACKUP_MODEL_ID = process.env.LLM_BACKUP_MODEL_ID ?? "gpt-5.5";
 
 const emptyUsage: AssistantMessage["usage"] = {
   input: 0,
@@ -60,17 +58,6 @@ const emptyUsage: AssistantMessage["usage"] = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
-
-function isKimiProvider(provider: string) {
-  return provider === "moonshotai-cn" || provider === "moonshotai" || provider === "kimi";
-}
-
-function backupConfig() {
-  const apiKey = process.env.LLM_BACKUP_API_KEY;
-  const baseUrl = process.env.LLM_BACKUP_BASE_URL;
-  if (!apiKey || !baseUrl) return null;
-  return { apiKey, baseUrl, modelId: LLM_BACKUP_MODEL_ID };
-}
 
 function toProxyEvent(event: AssistantMessageEvent): PercentProxyEvent | undefined {
   switch (event.type) {
@@ -142,95 +129,38 @@ app.post("/model/stream", async (c) => {
       400,
     );
   }
-  const { model: m, context, options } = parsed.data;
-  const provider = m.provider as string;
+  const { context, options } = parsed.data;
+  const llm = getLlmConfig();
+  const provider = llm.provider;
+  const providerKey = provider as keyof typeof PROVIDER_PRESETS;
+  const preset = PROVIDER_PRESETS[providerKey];
+  const modelId = llm.modelId ?? preset?.defaultModelId;
+  const baseUrl = llm.baseUrl ?? preset?.baseUrl;
 
-  // Resolve the API key: per-provider env first, then generic, then
-  // the (deprecated) per-request key for back-compat with callers that
-  // were written before the env-only policy.
+  // Server config is authoritative for the proxy route. The client still
+  // sends its runtime model for protocol compatibility, but this route
+  // always uses LLM_PROVIDER / LLM_MODEL_ID / LLM_BASE_URL.
   const providerEnv = `${provider.toUpperCase()}_API_KEY`;
-  const apiKey =
-    process.env[providerEnv] ?? process.env.LLM_API_KEY ?? options.apiKey ?? "";
+  const apiKey = process.env[providerEnv] || llm.apiKey || options.apiKey || "";
   if (!apiKey) {
     return c.json(
-      { code: 500, message: `server has no API key for provider ${provider}` },
+      {
+        code: 500,
+        message: `server has no API key for provider ${provider} (set ${providerEnv}, LLM_API_KEY, or legacy LLM_BACKUP_API_KEY)`,
+      },
       500,
     );
   }
 
   let modelObj;
   try {
-    // The agent runtime speaks pi-ai's internal provider names
-    // ("moonshotai-cn", "openai", "anthropic", …) while our runtime
-    // presets are keyed by our own short id ("kimi", "openai", …).
-    // Normalize the common aliases before looking up.
-    const alias: Record<string, keyof typeof PROVIDER_PRESETS> = {
-      "moonshotai-cn": "kimi",
-      "moonshotai": "kimi",
-      "kimi-coding": "kimi",
-    };
-    const providerKey = alias[provider] ?? (provider as keyof typeof PROVIDER_PRESETS);
-    const preset = PROVIDER_PRESETS[providerKey];
     modelObj = buildProviderModel({
       provider: providerKey,
-      modelId: m.id,
-      baseUrl: m.baseUrl ?? preset?.baseUrl,
+      modelId,
+      baseUrl,
     });
   } catch {
     return c.json({ code: 400, message: `unknown provider: ${provider}` }, 400);
-  }
-
-  const baseUrl = m.baseUrl ?? "https://api.moonshot.cn/v1";
-  if (isMoonshotKimi(provider, m.id, baseUrl)) {
-    const fallback = backupConfig();
-    const body = streamMoonshotKimi({
-      apiKey,
-      baseUrl,
-      modelId: m.id,
-      systemPrompt: context.systemPrompt ?? undefined,
-      messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
-      tools: context.tools,
-      maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
-      thinking: options.reasoning ? { type: "enabled" } : undefined,
-      fallback: fallback
-        ? {
-            apiKey: fallback.apiKey,
-            baseUrl: fallback.baseUrl,
-            modelId: fallback.modelId,
-            systemPrompt: context.systemPrompt ?? undefined,
-            messages: context.messages.filter((msg: { role?: string }) => msg.role === "user") as MoonshotMessage[],
-            tools: context.tools,
-            maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
-          }
-        : undefined,
-      onPrimaryError: (error) => {
-        logError("agent_stream.llm_backup", {
-          trace_id: traceId,
-          provider,
-          model_id: m.id,
-          backup_model_id: fallback?.modelId,
-          error: String(error),
-          duration_ms: elapsedMs(startedAt),
-          enabled: Boolean(fallback),
-        });
-      },
-      onFallbackError: (error) => {
-        logError("agent_stream.backup_failed", {
-          trace_id: traceId,
-          provider,
-          model_id: m.id,
-          backup_model_id: fallback?.modelId,
-          error: String(error),
-          duration_ms: elapsedMs(startedAt),
-        });
-      },
-    });
-    return new Response(body, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-      },
-    });
   }
 
   // streamSimple(model, context, options) returns pi-ai's raw
@@ -241,7 +171,7 @@ app.post("/model/stream", async (c) => {
     ...(options as SimpleStreamOptions),
     apiKey,
     maxTokens: options.maxTokens ?? DEFAULT_AGENT_MAX_TOKENS,
-    temperature: options.temperature ?? (isKimiProvider(provider) ? 1 : undefined),
+    temperature: options.temperature,
   };
   const stream = streamSimple(modelObj, context as Context, streamOptions);
 
@@ -263,14 +193,14 @@ app.post("/model/stream", async (c) => {
         logInfo("agent_stream.ok", {
           trace_id: traceId,
           provider,
-          model_id: m.id,
+          model_id: modelId,
           duration_ms: elapsedMs(startedAt),
         });
       } catch (e) {
         logError("agent_stream.failed", {
           trace_id: traceId,
           provider,
-          model_id: m.id,
+          model_id: modelId,
           error: String(e),
           duration_ms: elapsedMs(startedAt),
         });

@@ -74,15 +74,16 @@ export async function callChat(args: CallChatArgs): Promise<{ text: string }> {
     imageBase64,
     imageMime,
   } = args;
-  return post<{ text: string }>(`${API_BASE}/chat`, {
+  const payload: Record<string, unknown> = {
     system_prompt: systemPrompt,
     messages,
-    provider: provider ?? "kimi",
     model_id: modelId,
     base_url: baseUrl,
     image_base64: imageBase64,
     image_mime: imageMime,
-  });
+  };
+  if (provider) payload.provider = provider;
+  return post<{ text: string }>(`${API_BASE}/chat`, payload);
 }
 
 // ── facades ─────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ export async function callChat(args: CallChatArgs): Promise<{ text: string }> {
  *  the first user message's content array so the LLM sees text + image.
  *
  *  Image blocks use the OpenAI /chat completions shape (the runtime
- *  routes kimi/openai/deepseek/MiniMax through this same format). The
+ *  routes OpenAI-compatible providers through this same format). The
  *  previous `{ type: "image", data, mimeType }` shape is the runtime's
  *  internal `ImageContent` type and doesn't survive the wire trip to
  *  most providers — the LLM silently ignores the image and answers

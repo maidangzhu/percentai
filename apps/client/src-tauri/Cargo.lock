@@ -1749,7 +1749,7 @@ dependencies = [
 
 [[package]]
 name = "iana-time-zone"
-version = "0.1.65"
+version = "0.1.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
 dependencies = [
@@ -2762,7 +2762,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "percent"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "chrono",
  "core-foundation 0.9.4",

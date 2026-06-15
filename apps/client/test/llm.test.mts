@@ -44,7 +44,7 @@ test("callChat POSTs to /chat with system_prompt + messages", async () => {
   const body = JSON.parse(fetchCalls[0].init?.body as string);
   assert.equal(body.system_prompt, "be helpful");
   assert.deepEqual(body.messages, [{ role: "user", content: "hi" }]);
-  assert.equal(body.provider, "kimi");
+  assert.equal("provider" in body, false);
   // No api_key field — the client must never put the provider key in the
   // request body.
   assert.equal("api_key" in body, false);

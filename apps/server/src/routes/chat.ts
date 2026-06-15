@@ -16,12 +16,7 @@ import {
   type TextContent,
 } from "@percent/runtime";
 import { elapsedMs, logError, logInfo } from "../lib/appLogger.js";
-import {
-  completeMoonshotKimi,
-  completeOpenAICompatible,
-  isMoonshotKimi,
-  type MoonshotMessage,
-} from "../lib/moonshot.js";
+import { getLlmConfig } from "../lib/llmConfig.js";
 
 // UserMessage.content is `string | (TextContent | ImageContent)[]`. We
 // can't import UserMessage directly (runtime re-exports only the union
@@ -41,7 +36,7 @@ const requestSchema = z.object({
       }),
     )
     .min(1),
-  provider: z.string().default("kimi"),
+  provider: z.string().optional(),
   model_id: z.string().optional(),
   // api_key is NOT accepted from the client — the server holds the
   // provider key in env (LLM_API_KEY or per-provider override) and
@@ -58,18 +53,12 @@ type AppEnv = { Variables: { traceId?: string } };
 const app = new Hono<AppEnv>();
 const DEFAULT_LLM_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS ?? 2048);
 const LLM_RETRY_DELAY_MS = Number(process.env.LLM_RETRY_DELAY_MS ?? 300);
-const LLM_BACKUP_MODEL_ID = process.env.LLM_BACKUP_MODEL_ID ?? "gpt-5.5";
 
 function providerOptions(provider: string) {
   const options: { apiKey: string; maxTokens: number; temperature?: number } = {
     apiKey: "",
     maxTokens: DEFAULT_LLM_MAX_TOKENS,
   };
-  if (provider === "kimi") {
-    // Kimi K2.6 rejects arbitrary temperatures for the production key, and
-    // uncapped reasoning can run past Vercel's function timeout.
-    options.temperature = 1;
-  }
   return options;
 }
 
@@ -103,49 +92,6 @@ async function callLlmWithOneRetry<T>(
   }
 }
 
-function backupConfig() {
-  const apiKey = process.env.LLM_BACKUP_API_KEY;
-  const baseUrl = process.env.LLM_BACKUP_BASE_URL;
-  if (!apiKey || !baseUrl) return null;
-  return { apiKey, baseUrl, modelId: LLM_BACKUP_MODEL_ID };
-}
-
-async function completeMoonshotWithBackup(input: {
-  apiKey: string;
-  baseUrl: string;
-  modelId: string;
-  systemPrompt?: string;
-  messages: MoonshotMessage[];
-  maxTokens: number;
-  traceId?: string;
-  provider: string;
-  startedAt: number;
-}) {
-  try {
-    return await completeMoonshotKimi(input);
-  } catch (error) {
-    const fallback = backupConfig();
-    logError("chat.llm_backup", {
-      trace_id: input.traceId,
-      provider: input.provider,
-      model_id: input.modelId,
-      backup_model_id: fallback?.modelId,
-      error: String(error),
-      duration_ms: elapsedMs(input.startedAt),
-      enabled: Boolean(fallback),
-    });
-    if (!fallback) throw error;
-    return completeOpenAICompatible({
-      apiKey: fallback.apiKey,
-      baseUrl: fallback.baseUrl,
-      modelId: fallback.modelId,
-      systemPrompt: input.systemPrompt,
-      messages: input.messages,
-      maxTokens: input.maxTokens,
-    });
-  }
-}
-
 app.post("/", async (c) => {
   const startedAt = Date.now();
   const raw = await c.req.json().catch(() => null);
@@ -158,31 +104,29 @@ app.post("/", async (c) => {
   }
   const body = parsed.data;
   const traceId = c.get("traceId");
+  const llm = getLlmConfig();
 
-  const preset = PROVIDER_PRESETS[body.provider as keyof typeof PROVIDER_PRESETS];
-  const baseUrl = body.base_url ?? preset?.baseUrl ?? "https://api.moonshot.cn/v1";
-  // The default Kimi model `kimi-k2.6` is multimodal — it accepts the
-  // `ImageContent` blocks the client folds in and actually sees the
-  // screenshot. No model swap needed.
-  const modelId = body.model_id ?? preset?.defaultModelId ?? "kimi-k2.6";
+  const provider = body.provider ?? llm.provider;
+  const preset = PROVIDER_PRESETS[provider as keyof typeof PROVIDER_PRESETS];
+  const baseUrl = body.base_url ?? llm.baseUrl ?? preset?.baseUrl;
+  const modelId = body.model_id ?? llm.modelId ?? preset?.defaultModelId;
 
   // Server holds the provider key. Look up per-provider first, fall back
   // to a generic LLM_API_KEY. We never accept an api_key from the
   // client — that would put a secret in the request body where it could
   // be logged.
-  const providerEnv = `${body.provider.toUpperCase()}_API_KEY`;
-  const apiKey =
-    process.env[providerEnv] ?? process.env.LLM_API_KEY ?? "";
+  const providerEnv = `${provider.toUpperCase()}_API_KEY`;
+  const apiKey = process.env[providerEnv] || llm.apiKey;
   if (!apiKey) {
     logError("chat.no_api_key", {
       trace_id: traceId,
-      provider: body.provider,
+      provider,
       env_var: providerEnv,
     });
     return c.json(
       {
         code: 500,
-        message: `server is not configured for provider ${body.provider} (set ${providerEnv} or LLM_API_KEY)`,
+        message: `server is not configured for provider ${provider} (set ${providerEnv}, LLM_API_KEY, or legacy LLM_BACKUP_API_KEY)`,
       },
       500,
     );
@@ -191,12 +135,12 @@ app.post("/", async (c) => {
   let model;
   try {
     model = buildProviderModel({
-      provider: body.provider as Parameters<typeof buildProviderModel>[0]["provider"],
+      provider: provider as Parameters<typeof buildProviderModel>[0]["provider"],
       modelId,
       baseUrl,
     });
   } catch {
-    return c.json({ code: 400, message: `unknown provider: ${body.provider}` }, 400);
+    return c.json({ code: 400, message: `unknown provider: ${provider}` }, 400);
   }
 
   // Fold the top-level image_base64 into the first user message, if any.
@@ -239,30 +183,7 @@ app.post("/", async (c) => {
 
   let text: string;
   try {
-    if (isMoonshotKimi(body.provider, modelId, baseUrl, false)) {
-      const result = await completeMoonshotWithBackup({
-        apiKey,
-        baseUrl,
-        modelId,
-        systemPrompt: body.system_prompt,
-        messages: messages as MoonshotMessage[],
-        maxTokens: DEFAULT_LLM_MAX_TOKENS,
-        traceId,
-        provider: body.provider,
-        startedAt,
-      });
-      text = result.text;
-      logInfo("chat.ok", {
-        trace_id: traceId,
-        provider: body.provider,
-        model_id: modelId,
-        duration_ms: elapsedMs(startedAt),
-        output_chars: text.length,
-      });
-      return c.json({ code: 200, message: "ok", data: { text } });
-    }
-
-    const options = providerOptions(body.provider);
+    const options = providerOptions(provider);
     options.apiKey = apiKey;
     const result = await callLlmWithOneRetry(
       () => completeSimple(
@@ -270,7 +191,7 @@ app.post("/", async (c) => {
         { systemPrompt: body.system_prompt, messages },
         options,
       ),
-      { traceId, provider: body.provider, modelId, startedAt },
+      { traceId, provider, modelId, startedAt },
     );
     text = (result.content ?? [])
       .filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -279,7 +200,7 @@ app.post("/", async (c) => {
   } catch (e) {
     logError("chat.llm_failed", {
       trace_id: traceId,
-      provider: body.provider,
+      provider,
       model_id: modelId,
       error: String(e),
       duration_ms: elapsedMs(startedAt),
@@ -292,7 +213,7 @@ app.post("/", async (c) => {
 
   logInfo("chat.ok", {
     trace_id: traceId,
-    provider: body.provider,
+    provider,
     model_id: modelId,
     duration_ms: elapsedMs(startedAt),
     output_chars: text.length,
