@@ -1,40 +1,28 @@
 # 隐私政策 / Privacy Policy
 
-最后更新 / Last updated: 2026-06-09
+最后更新 / Last updated: 2026-06-18
 
 ## 概要 / Summary
 
-Percent 是一个本地优先（local-first）的 macOS 工具。**你的聊天记录、任务、联系人、截图全部存在你自己的 Mac 上（`~/.percent-tracker/`），我们看不到也拿不到。** 唯一上传到云端的是你的账号信息（邮箱 + 密码哈希）和积分余额。
+Percent 是一个本地优先（local-first）的 macOS 工具，默认以 **BYOK（自带 API key）** 模式运行。**你的聊天记录、任务、联系人、截图、API key 全部存在你自己的 Mac 上（`~/.percent-tracker/`），我们看不到也拿不到。** 客户端直连你配置的 LLM provider（OpenAI / Anthropic / Moonshot / 等），完全不经过 Percent 的服务器。
 
-Percent is a local-first macOS tool. **Your chats, tasks, contacts, and screenshots live only on your Mac (`~/.percent-tracker/`). We cannot see or access them.** The only data we upload to the cloud is your account (email + password hash) and credit balance.
+Percent is a local-first macOS tool that runs BYOK (Bring Your Own Key) by default. **Your chats, tasks, contacts, screenshots, and API key live only on your Mac (`~/.percent-tracker/`). We cannot see or access them.** The client talks to your configured LLM provider directly — no Percent server is involved in the data path.
 
 ---
 
 ## 1. 我们收集什么 / What We Collect
 
-### 1.1 账号数据 / Account data
+### 1.1 不收集 / Nothing
 
-存于 Neon PostgreSQL（经 Better Auth）：
+BYOK 模式下 Percent 不上传任何用户数据：没有账号、没有登录、没有积分、没有 usage 上报。所有 LLM 调用直连 provider。
 
-- 邮箱、密码哈希、登录 session
-- 积分余额、积分流水
+In BYOK mode Percent uploads nothing: no account, no login, no credits, no usage telemetry. Every LLM call goes directly from your Mac to your provider.
 
-Stored in Neon PostgreSQL (via Better Auth):
+### 1.2 之前留下的（云模式已停用）/ What used to be there (cloud mode retired)
 
-- Email, password hash, login sessions
-- Credit balance and transaction history
+2026-06 之前的版本曾有一个可选的云模式（server 转发 LLM + 积分扣费）。该模式已停用，代码保留但不再 deploy、不再运行。如果你的 Neon 数据库里还残留旧的账号 / 积分数据，发邮件到下方邮箱申请删除。
 
-### 1.2 使用事件 / Usage events
-
-- 跨设备登录记录（你哪天在哪个设备上登录了 Percent）
-- BYOK 路径下的 provider / model / token 计数（**不存 key，不存内容**）
-
-### 1.3 我们不收集 / What we do NOT collect
-
-- 聊天内容（始终本地；分析时临时送 Moonshot，见 §3）
-- 截图
-- 任务、联系人、agent 对话
-- BYOK API key（始终在 Tauri 文件 `~/.percent-tracker/byok.key`，mode 0600）
+Earlier versions had an optional cloud mode (server-side LLM proxy + credit deduction). It has been retired: the code is kept in git history but is no longer deployed or run. If your Neon DB still has stale account / credit records, email us to delete them.
 
 ---
 
@@ -48,7 +36,7 @@ All the following stays **only on your Mac**:
 |------------|----------------|-------------|
 | 聊天记录、任务、联系人 / Chats, tasks, contacts | `~/.percent-tracker/percent.db` (SQLite) | Snowflake ID 主键 |
 | 截图 / Screenshots | `~/.percent-tracker/screenshots/*.png` | "Clear cache" 一键清空 |
-| 客户端 / 服务端日志 / Logs | `~/.percent-tracker/{bubble,server}-pipeline.log` | 结构化 JSON，含 `trace_id` |
+| 客户端日志 / Logs | `~/.percent-tracker/bubble-pipeline.log` | 结构化 JSON，含 `trace_id` |
 | BYOK API key | `~/.percent-tracker/byok.key` (Tauri 文件, mode 0600) | 不进 localStorage，不上云 |
 | BYOK 非秘密配置 / Non-secret BYOK config | browser localStorage | provider / modelId / modelName / baseUrl |
 | 快捷键、设置 / Shortcut, settings | `~/.percent-tracker/settings.json` | |
@@ -63,10 +51,19 @@ Your data leaves your Mac at the following moments:
 
 | 场景 / Scenario | 去向 / Destination | 数据 / What's sent |
 |----------------|--------------------|--------------------|
-| 按 Enter 留痕 / Draft a reply / Capture task | Moonshot AI（kimi-k2.6） | 当前截图 + 该联系人历史 chat 上下文（多模态分析） |
-| 默认路径下的 Agent 多轮对话 | Moonshot AI（kimi-k2.6）经 Percent server 代理 | 你的 prompt + 工具调用结果 |
-| BYOK 路径下的 Agent 多轮对话 | 你配置的 provider（OpenAI / Anthropic / 等） | 你的 prompt + 工具调用结果（**完全不经 Percent server**） |
-| 账号登录、积分扣减 | Neon PostgreSQL | 邮箱 / 密码哈希 / 积分流水 |
+| 按 Enter 留痕 / Draft a reply / Capture task | 你配置的 LLM provider（OpenAI / Anthropic / MiniMax / Moonshot / 等） | 当前截图 + 该联系人历史 chat 上下文（多模态分析） |
+| Agent 多轮对话 | 同上 | 你的 prompt + 工具调用结果 |
+| 网络请求（基于 tauri-plugin-http） | provider | 不经 Percent server。CORS 由 Rust 侧绕过（只允许白名单内 URL） |
+
+默认 BYOK 模式下，**没有任何数据经过 Percent 控制的服务器**。
+
+In default BYOK mode, **no data passes through any server Percent controls**.
+
+### 3.1 provider 白名单 / Provider allowlist
+
+客户端通过 `tauri-plugin-http` 走 Rust 进程发请求以绕过 WebView CORS。`apps/client/src-tauri/capabilities/default.json` 里维护了一个 URL 白名单——加新 provider 需要同时改 capabilities 和重 build。
+
+The client uses `tauri-plugin-http` to bypass WebView CORS via the Rust process. A URL allowlist in `apps/client/src-tauri/capabilities/default.json` restricts which providers can be reached — adding a new provider requires updating the capabilities and rebuilding.
 
 ---
 
@@ -93,7 +90,7 @@ You can revoke any permission anytime via **System Settings → Privacy & Securi
 - **导出本地数据 / Export**: SQLite 文件 `~/.percent-tracker/percent.db` 是标准格式，可自行复制（暂无 UI 导出）
 - **删除本地数据 / Delete local data**: 主窗口 → Settings → "Clear cache" 清截图与 enter-log；DB 可手动 `rm`
 - **删除截图 / Delete screenshots**: 同上
-- **注销账号 / Delete account**: 发邮件到下方邮箱，7 天内删除 Neon 上的账号和积分记录
+- **删除 BYOK key / Delete BYOK key**: 主窗口 → Settings → BYOK section → 清空
 
 ---
 

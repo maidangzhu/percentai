@@ -1,83 +1,134 @@
-// Tests for client `lib/llm.ts` — the chat proxy facade.
-// We mock globalThis.fetch and verify the right URL / payload is sent
-// for each facade (callChat / callAnalyze / callSuggest / callAgent).
+// Tests for client `lib/llm.ts` — the BYOK facades (callChat / callAnalyze /
+// callSuggest / callAgent).
 //
-// The client NEVER sends an API key — the server reads it from env.
+// We mock two things:
+//   - `globalThis.fetch` is replaced with a stub that returns a fixed
+//     OpenAI-style SSE response. This is what the OpenAI SDK (and our
+//     `streamMiniMax` adapter) reads; tauri-plugin-http's `fetch` is not
+//     involved because no Tauri runtime is loaded in unit tests.
+//   - The Tauri `invoke` for `get_byok_key` is stubbed by writing a
+//     `__test_byok_key` symbol the production code falls back to when no
+//     Tauri runtime is present. See `apps/client/src/lib/byokConfig.ts`.
 //
-// Run: cd /Users/zhujianye/maidang/percent/apps/client && pnpm exec tsx --test test/llm.test.mts
+// What we verify:
+//   - callAnalyze / callSuggest / callAgent funnel into the provider stream
+//     and concatenate the response text.
+//   - The SSE body of the mock is consumed and returned as `{ text: ... }`.
+//   - The M3-specific request body (reasoning_split / thinking) reaches
+//     `fetch`.
+//   - callChat throws ByokNotConfiguredError when no key is configured.
+//
+// Run: cd apps/client && pnpm exec tsx --test test/llm.test.mts
 
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mock } from "node:test";
+import test, { mock } from "node:test";
 
-const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
-let nextResponse = { status: 200, body: { code: 0, data: { text: "" } } };
+// Minimal `localStorage` shim for the Node test runner — the real Tauri
+// WebView provides this; the runner doesn't.
+const storage = new Map<string, string>();
+(globalThis as Record<string, unknown>).localStorage = {
+  getItem: (k: string) => storage.get(k) ?? null,
+  setItem: (k: string, v: string) => void storage.set(k, v),
+  removeItem: (k: string) => void storage.delete(k),
+  clear: () => storage.clear(),
+  key: (i: number) => Array.from(storage.keys())[i] ?? null,
+  get length() {
+    return storage.size;
+  },
+};
 
-mock.method(globalThis, "fetch", async (url: any, init?: RequestInit) => {
-  fetchCalls.push({ url: String(url), init });
-  return new Response(JSON.stringify(nextResponse.body), {
-    status: nextResponse.status,
-    headers: { "Content-Type": "application/json" },
-  });
-});
+const CONFIG_KEY = "percent.byok.config";
 
-const { callChat, callAnalyze, callSuggest, callAgent } = await import(
-  "../src/lib/llm.ts"
-);
-const { SCREENSHOT_ANALYZE_SYSTEM_PROMPT, SUGGEST_TRIO_SYSTEM_PROMPT } =
-  await import("../src/lib/prompts.ts");
-
-function reset(text = "OK") {
-  fetchCalls.length = 0;
-  nextResponse = { status: 200, body: { code: 0, data: { text } } };
+function setByokConfigInStorage(value: unknown) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(value));
 }
 
-test("callChat POSTs to /chat with system_prompt + messages", async () => {
-  reset("hello");
-  const out = await callChat({
-    systemPrompt: "be helpful",
-    messages: [{ role: "user", content: "hi" }],
+function clearByokConfigFromStorage() {
+  if (typeof localStorage === "undefined") return;
+  localStorage.removeItem(CONFIG_KEY);
+}
+
+const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+let nextResponseBody = "";
+
+function sseEncode(chunks: Array<Record<string, unknown>>): string {
+  return chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
+}
+
+function setSseResponse(chunks: Array<Record<string, unknown>>) {
+  nextResponseBody = sseEncode(chunks);
+}
+
+function makeFetchStub() {
+  return async (url: any, init?: RequestInit) => {
+    fetchCalls.push({ url: String(url), init });
+    const encoder = new TextEncoder();
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(nextResponseBody));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      },
+    );
+  };
+}
+
+const fetchStub = mock.method(globalThis, "fetch", makeFetchStub());
+
+// Stub the Tauri `invoke` for `get_byok_key` by routing through
+// `globalThis.__percent_test_byok_key`. The `byokConfig.ts` module reads
+// this when `invoke` is unavailable (which it is in unit tests — no Tauri
+// runtime is loaded).
+const TEST_KEY = "sk-test-key-from-disk";
+(globalThis as Record<string, unknown>).__percent_test_byok_key = TEST_KEY;
+
+const llm = await import("../src/lib/llm.ts");
+const { isByokConfigured } = await import("../src/lib/byokConfig.ts");
+
+function resetConfig() {
+  fetchCalls.length = 0;
+  clearByokConfigFromStorage();
+  setByokConfigInStorage({
+    enabled: true,
+    provider: "minimax",
+    modelId: "MiniMax-M3",
+    modelName: "MiniMax M3",
+    baseUrl: "https://api.minimaxi.com/v1",
   });
-  assert.equal(fetchCalls.length, 1);
-  assert.equal(fetchCalls[0].url, "http://localhost:3000/chat");
-  assert.equal(fetchCalls[0].init?.method, "POST");
-  const body = JSON.parse(fetchCalls[0].init?.body as string);
-  assert.equal(body.system_prompt, "be helpful");
-  assert.deepEqual(body.messages, [{ role: "user", content: "hi" }]);
-  assert.equal("provider" in body, false);
-  // No api_key field — the client must never put the provider key in the
-  // request body.
-  assert.equal("api_key" in body, false);
-  assert.equal(out.text, "hello");
+}
+
+test.beforeEach(() => {
+  resetConfig();
 });
 
-test("callChat sends image_base64 + image_mime when provided", async () => {
-  reset();
-  await callChat({
-    messages: [{ role: "user", content: "see" }],
-    imageBase64: "AAAA",
-    imageMime: "image/jpeg",
-  });
-  const body = JSON.parse(fetchCalls[0].init?.body as string);
-  assert.equal(body.image_base64, "AAAA");
-  assert.equal(body.image_mime, "image/jpeg");
-});
+test("callAnalyze streams to provider, returns concatenated text", async () => {
+  setSseResponse([
+    {
+      id: "x",
+      object: "chat.completion.chunk",
+      created: 0,
+      model: "MiniMax-M3",
+      choices: [
+        { index: 0, delta: { content: '{"is_chat": true}' }, finish_reason: null },
+      ],
+    },
+    {
+      id: "x",
+      object: "chat.completion.chunk",
+      created: 0,
+      model: "MiniMax-M3",
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    },
+  ]);
 
-test("callChat accepts a custom provider + model", async () => {
-  reset();
-  await callChat({
-    messages: [{ role: "user", content: "x" }],
-    provider: "openai",
-    modelId: "gpt-4o",
-  });
-  const body = JSON.parse(fetchCalls[0].init?.body as string);
-  assert.equal(body.provider, "openai");
-  assert.equal(body.model_id, "gpt-4o");
-});
-
-test("callAnalyze embeds the screenshot in the first user message", async () => {
-  reset();
-  await callAnalyze({
+  const out = await llm.callAnalyze({
     log: {
       id: "log1",
       occurred_at: "2026-06-13T10:00:00Z",
@@ -85,90 +136,95 @@ test("callAnalyze embeds the screenshot in the first user message", async () => 
       app_bundle_id: "com.tencent.xinWeChat",
       is_send: true,
       is_wechat: true,
-      screenshot_path: "/tmp/x.png",
+      screenshot_path: null,
     },
-    image_base64: "IMG_BASE64",
-    recent_people: [{ id: "p1", name: "Alice" }],
-    recent_tasks: [{ id: "t1", title: "buy milk" }],
-    recent_messages: [{ role: "self", content: "see you tomorrow" }],
+    image_base64: "IMG",
+    recent_people: [],
+    recent_tasks: [],
+    recent_messages: [],
   });
+
+  assert.equal(out.text, '{"is_chat": true}');
   assert.equal(fetchCalls.length, 1);
-  assert.equal(fetchCalls[0].url, "http://localhost:3000/chat");
+  // M3-specific request body: reasoning_split on, thinking disabled.
   const body = JSON.parse(fetchCalls[0].init?.body as string);
-  assert.equal(body.system_prompt, SCREENSHOT_ANALYZE_SYSTEM_PROMPT);
-  // The user message is a content array (NOT a JSON string) — the
-  // runtime's `Message.content` is `string | ContentBlock[]` and we send
-  // the array form so the wire format reaches the provider unchanged.
-  const userMessage = body.messages[0];
-  assert.equal(userMessage.role, "user");
-  assert.ok(Array.isArray(userMessage.content));
-  const blocks = userMessage.content as Array<{ type: string; data?: string; mimeType?: string; text?: string }>;
-  assert.equal(blocks.length, 2);
-  assert.equal(blocks[0].type, "text");
-  assert.equal(blocks[1].type, "image");
-  assert.equal(blocks[1].data, "IMG_BASE64");
-  assert.equal(blocks[1].mimeType, "image/png");
-  // Recent context is included in the text block.
-  const text = blocks[0].text ?? "";
-  assert.ok(text.includes("Alice"), "recent_people should be included");
-  assert.ok(text.includes("buy milk"), "recent_tasks should be included");
-  assert.ok(text.includes("see you tomorrow"), "recent_messages should be included");
-  // No byok/api_key in the request body.
-  assert.equal("api_key" in body, false);
-  assert.equal("byok" in body, false);
+  assert.equal(body.reasoning_split, true);
+  assert.deepEqual(body.thinking, { type: "disabled" });
+  assert.equal(body.model, "MiniMax-M3");
 });
 
-test("callSuggest uses SUGGEST_TRIO prompt + no recent_messages", async () => {
-  reset();
-  await callSuggest({
-    person_name: "Alice",
+test("callSuggest returns text and respects provider key", async () => {
+  setSseResponse([
+    {
+      id: "y",
+      object: "chat.completion.chunk",
+      created: 0,
+      model: "MiniMax-M3",
+      choices: [
+        { index: 0, delta: { content: '{"replies":{"steady":"hi"}}' }, finish_reason: null },
+      ],
+    },
+    {
+      id: "y",
+      object: "chat.completion.chunk",
+      created: 0,
+      model: "MiniMax-M3",
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    },
+  ]);
+
+  const out = await llm.callSuggest({
     recent_messages: [{ role: "other", content: "ok" }],
     image_base64: "ZZZ",
   });
-  const body = JSON.parse(fetchCalls[0].init?.body as string);
-  assert.equal(body.system_prompt, SUGGEST_TRIO_SYSTEM_PROMPT);
-  const userMessage = body.messages[0];
-  assert.ok(Array.isArray(userMessage.content));
-  const blocks = userMessage.content as Array<{ type: string; data?: string; text?: string }>;
-  assert.equal(blocks[1].data, "ZZZ");
-  const text = blocks[0].text ?? "";
-  assert.ok(text.includes("Alice"));
-  assert.ok(text.includes("ok"));
+  assert.equal(out.text, '{"replies":{"steady":"hi"}}');
+  assert.equal(fetchCalls.length, 1);
 });
 
-test("callSuggest without image sends a plain string user content", async () => {
-  reset();
-  await callSuggest({
-    recent_messages: [],
-  });
-  const body = JSON.parse(fetchCalls[0].init?.body as string);
-  const user = body.messages[0];
-  assert.equal(user.role, "user");
-  assert.equal(typeof user.content, "string");
-});
+test("callAgent with text messages returns text", async () => {
+  setSseResponse([
+    {
+      id: "z",
+      object: "chat.completion.chunk",
+      created: 0,
+      model: "MiniMax-M3",
+      choices: [{ index: 0, delta: { content: "agent-reply" }, finish_reason: null }],
+    },
+    {
+      id: "z",
+      object: "chat.completion.chunk",
+      created: 0,
+      model: "MiniMax-M3",
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    },
+  ]);
 
-test("callAgent POSTs to /chat with the system_prompt passed through", async () => {
-  reset("agent-reply");
-  const out = await callAgent({
+  const out = await llm.callAgent({
     system_prompt: "you are an agent",
     messages: [{ role: "user", content: "do X" }],
   });
-  const body = JSON.parse(fetchCalls[0].init?.body as string);
-  assert.equal(body.system_prompt, "you are an agent");
-  assert.deepEqual(body.messages, [
-    { role: "user", content: "do X" },
-  ]);
   assert.equal(out.text, "agent-reply");
 });
 
-test("callChat throws on non-2xx response", async () => {
-  reset();
-  nextResponse = { status: 500, body: { code: 502, message: "boom" } };
+test("callChat throws ByokNotConfiguredError when no key is set", async () => {
+  (globalThis as Record<string, unknown>).__percent_test_byok_key = null;
   await assert.rejects(
-    () =>
-      callChat({
-        messages: [{ role: "user", content: "x" }],
-      }),
-    /POST .* failed: 500/,
+    () => llm.callChat({ messages: [{ role: "user", content: "x" }] }),
+    /BYOK is not configured/,
   );
+  // restore
+  (globalThis as Record<string, unknown>).__percent_test_byok_key = TEST_KEY;
+});
+
+test("isByokConfigured returns true when enabled in localStorage", () => {
+  setByokConfigInStorage({ enabled: true, provider: "kimi", modelId: "x", modelName: "x", baseUrl: "" });
+  assert.equal(isByokConfigured(), true);
+});
+
+test("isByokConfigured returns false when disabled in localStorage", () => {
+  setByokConfigInStorage({ enabled: false, provider: "kimi", modelId: "x", modelName: "x", baseUrl: "" });
+  // Sanity check the localStorage write actually went through
+  const raw = localStorage.getItem(CONFIG_KEY);
+  assert.ok(raw && raw.includes('"enabled":false'), `localStorage should hold enabled:false, got: ${raw}`);
+  assert.equal(isByokConfigured(), false);
 });

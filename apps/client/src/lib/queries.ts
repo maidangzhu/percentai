@@ -5,13 +5,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { db } from "@/db/client";
-import {
-  API_BASE,
-  type ApiResponse,
-  type LogRow as DomainLogRow,
-  type TaskRow,
-} from "@/lib/types";
-import { authFetch } from "@/lib/auth";
+import type { LogRow as DomainLogRow, TaskRow } from "@/lib/types";
 import { newSnowflakeId } from "@/lib/snowflake";
 import { createTaskWithCalendar } from "@/lib/tasks";
 
@@ -21,19 +15,8 @@ export const queryKeys = {
   logs: ["logs"] as const,
   people: ["people"] as const,
   tasks: ["tasks"] as const,
-  credits: (userId: string) => ["credits", userId] as const,
   stats: ["stats"] as const,
 };
-
-/* ── Cloud fetchers (auth + credits only) ──────────────────── */
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const resp = await authFetch(url);
-  if (!resp.ok) throw new Error(`GET ${url} failed: ${resp.status}`);
-  const json = (await resp.json()) as ApiResponse<T>;
-  if (!json.data) throw new Error(`GET ${url} returned no data`);
-  return json.data;
-}
 
 /* ── Hooks ──────────────────────────────────────────────────── */
 
@@ -112,18 +95,6 @@ export function useTasks() {
   });
 }
 
-// credits is the only thing still on the cloud — it goes through the server.
-export function useCredits(userId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.credits(userId ?? ""),
-    queryFn: () =>
-      fetchJson<{ balance: number }>(`${API_BASE}/credits/balance/${userId}`),
-    enabled: !!userId,
-    staleTime: 10_000,
-    refetchOnWindowFocus: true,
-  });
-}
-
 // Stats: one round-trip to Rust for all counts.
 export function useStats() {
   return useQuery({
@@ -146,7 +117,6 @@ export function useStats() {
           task_detections: s.ai_task_detections,
           agent_messages: s.ai_agent_messages,
         },
-        credits_used: 0,
         last_active_at: null,
       };
     },
@@ -262,7 +232,6 @@ export function useInvalidateAll() {
     queryClient.invalidateQueries({ queryKey: queryKeys.logs });
     queryClient.invalidateQueries({ queryKey: queryKeys.people });
     queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
-    queryClient.invalidateQueries({ queryKey: ["credits"] });
     queryClient.invalidateQueries({ queryKey: queryKeys.stats });
   };
 }

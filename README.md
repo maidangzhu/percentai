@@ -35,10 +35,14 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm dev` 会并行启动：
-- `percent-server`（Hono，端口默认 3001）
+`pnpm dev` 启动：
 - `percent`（Tauri dev，会弹一个原生窗口）
-- `percent-cms`（Next.js，端口默认 3000）
+- `percent-cms`（Next.js，端口默认 3000，运营用）
+- `percent-landing`（Vite，端口默认 5180）
+
+> **BYOK 是默认模式**：LLM 调用完全直连你配置的 provider（OpenAI / Anthropic / Moonshot / MiniMax 等），不经任何 Percent 服务器。CORS 由 Tauri 的 Rust 侧绕过（`tauri-plugin-http`），provider URL 在 `apps/client/src-tauri/capabilities/default.json` 里白名单。
+>
+> 首次启动 → 主窗口 → Settings → BYOK section → 填 provider + 模型 + API key → 保存。配置完成后所有 AI 功能（按 Enter 留痕 / 帮我回 / 记任务 / 问屏幕）才能工作。
 
 首次启动会引导你授予 macOS 三类权限：屏幕录制、辅助功能、输入监控。  
 授权后重启应用生效。
@@ -53,18 +57,21 @@ pnpm dev
 percent/
 ├── apps/
 │   ├── client/      # Tauri macOS 客户端 (React + Vite + Tailwind + Rust)
-│   ├── server/      # Hono 后端 (Prisma + better-sqlite3 + Better Auth)
+│   ├── server/      # Hono 后端 (历史 cloud 模式代码，保留但不 deploy)
 │   ├── cms/         # 内部运营 CMS (Next.js)
 │   └── landing/     # 官网 thepercentai.com (Vite + React)
 ├── packages/
-│   └── runtime/     # 共享 agent core (@percent/runtime)
+│   └── runtime/     # 共享 agent core (@percent/runtime, pi-ai + pi-agent-core)
 ├── docs/
-│   └── product-flows.md   # 三条产品线详细流程
+│   ├── current-state.md   # 架构 + 决策记录
+│   └── onboarding.md      # 首次启动流程 + 配置入口的产品 spec
 ├── PRIVACY.md
 ├── TERMS.md
 ├── LICENSE
 └── README.md
 ```
+
+> `apps/server` 目录保留了之前的 Hono 代码（之前曾是 Cloud 模式：server 转发 LLM + 积分扣费），但 dev / deploy 都已经切走——`pnpm dev` 不再启动它。如需恢复旧 cloud 模式可用 `pnpm dev:server` 显式启动。
 
 ---
 

@@ -25,7 +25,7 @@ import { db } from "@/db/client";
 import { newSnowflakeId } from "@/lib/snowflake";
 import { logInfo, logWarn, logError, newTraceId as logNewTraceId } from "@/lib/logger";
 import { callAnalyze, callSuggest } from "@/lib/llm";
-import { canUseAiCredits, useAiCreditsAvailable } from "@/lib/creditsGate";
+import { isByokConfiguredAsync } from "@/lib/byokConfig";
 
 function serializeError(e: unknown) {
   if (e instanceof Error) return { name: e.name, message: e.message, stack: e.stack };
@@ -48,14 +48,28 @@ interface EnterEvent {
   is_send: boolean;
   is_wechat: boolean;
   screenshot_path: string | null;
+  capture_id: string;
 }
 
 interface CaptureContext {
+  capture_id: string;
   occurred_at: string;
   app_name: string;
   app_bundle_id: string;
   is_send: boolean;
   is_wechat: boolean;
+  screenshot_path: string | null;
+  image_base64: string | null;
+  image_width: number | null;
+  image_height: number | null;
+}
+
+/// Pushed by Rust when the background capture worker finishes.
+interface CaptureReadyEvent {
+  capture_id: string;
+  image_base64: string | null;
+  image_width: number | null;
+  image_height: number | null;
   screenshot_path: string | null;
 }
 
@@ -107,25 +121,66 @@ function isReplyWriteClipboardEnabled() {
 }
 
 // ---- Helpers ----
+//
+// captureAsync() issues the tauri command and returns a Promise that
+// resolves only when the Rust background thread has produced the image.
+// The tauri command itself returns in ~30ms (just osascript for the
+// frontmost app + uuid generation), so the click-driven path doesn't
+// block the WebView while the heavy capture + resize + encode runs.
 
-async function imagePathToBase64(path: string): Promise<string> {
-  // resized 命令在 Rust 侧把截图 resize 到 1280px 长边、JPEG q=80 再编码 base64。
-  // 实测把 vision LLM 调用从 ~14s 降到 ~8s（prompt tokens 4500→1700）。
-  return await invoke<string>("read_file_base64_resized", { path, maxDim: 1280 });
+/// Returned by `captureAsync()` — combines the metadata from the
+/// synchronous `capture_current_context` invoke with the eventual
+/// `capture-ready` event payload.
+interface CapturedFrame {
+  capture_id: string;
+  occurred_at: string;
+  app_name: string;
+  app_bundle_id: string;
+  is_send: boolean;
+  is_wechat: boolean;
+  screenshot_path: string | null;
+  image_base64: string;
+  image_width: number | null;
+  image_height: number | null;
 }
 
-async function captureCurrentScreen(): Promise<CaptureContext | null> {
-  try {
-    const captured = await invoke<CaptureContext>("capture_current_context");
-    return captured.screenshot_path ? captured : null;
-  } catch (e) {
-    console.error("[bubble] capture_current_context failed:", e);
-    return null;
+async function captureAsync(
+  pendingCapturesRef: React.MutableRefObject<Map<string, (payload: CaptureReadyEvent) => void>>,
+): Promise<CapturedFrame> {
+  const meta = await invoke<CaptureContext>("capture_current_context");
+  if (!meta.capture_id) {
+    throw new Error("capture_current_context returned empty capture_id");
   }
+  const ready = await new Promise<CaptureReadyEvent>((resolve) => {
+    pendingCapturesRef.current.set(meta.capture_id, resolve);
+  });
+  if (!ready.image_base64) {
+    throw new Error(`capture ${meta.capture_id} returned no image`);
+  }
+  return {
+    capture_id: meta.capture_id,
+    occurred_at: meta.occurred_at,
+    app_name: meta.app_name,
+    app_bundle_id: meta.app_bundle_id,
+    is_send: meta.is_send,
+    is_wechat: meta.is_wechat,
+    screenshot_path: ready.screenshot_path ?? meta.screenshot_path,
+    image_base64: ready.image_base64,
+    image_width: ready.image_width,
+    image_height: ready.image_height,
+  };
 }
 
 async function runAnalyzePipeline(
-  event: Omit<EnterEvent, "entry_id">,
+  event: {
+    occurred_at: string;
+    app_name: string;
+    app_bundle_id: string;
+    is_send: boolean;
+    is_wechat: boolean;
+    screenshot_path: string | null;
+  },
+  imageBase64: string,
   onTaskCandidate: TaskCandidateHandler,
   entryId?: number,
   options: {
@@ -190,29 +245,19 @@ async function runAnalyzePipeline(
     return null;
   }
 
-  let imageBase64: string;
-  try {
-    const startedAt = performance.now();
-    logInfo("screenshot.read.start", {
-      trace_id: traceId,
-      log_id: logId,
-      screenshot_path: event.screenshot_path,
-    });
-    imageBase64 = await imagePathToBase64(event.screenshot_path);
-    logInfo("screenshot.read.success", {
-      trace_id: traceId,
-      log_id: logId,
-      image_base64_chars: imageBase64.length,
-      duration_ms: Math.round(performance.now() - startedAt),
-    });
-  } catch (e) {
+  if (!imageBase64) {
     logError("screenshot.read.error", {
       trace_id: traceId,
       log_id: logId,
-      error: serializeError(e),
+      error: { message: "image_base64 missing from capture" },
     });
     return null;
   }
+  logInfo("screenshot.read.success", {
+    trace_id: traceId,
+    log_id: logId,
+    image_base64_chars: imageBase64.length,
+  });
 
   try {
     const startedAt = performance.now();
@@ -468,11 +513,46 @@ async function runAnalyzePipeline(
 
 async function processEnterEvent(
   event: EnterEvent,
+  pendingCapturesRef: React.MutableRefObject<Map<string, (payload: CaptureReadyEvent) => void>>,
   onTaskCandidate: TaskCandidateHandler,
   onDedupSuppressed?: DedupSuppressedHandler,
   onPersonCreated?: (id: string, name: string) => void
 ) {
-  await runAnalyzePipeline(event, onTaskCandidate, event.entry_id, { onDedupSuppressed, onPersonCreated });
+  // Wait for the Rust background thread to finish the screenshot.
+  // If this Enter wasn't paired with a screenshot (non-WeChat or
+  // screenshot disabled), capture_id is "" and we skip the wait.
+  let imageBase64: string | null = null;
+  let screenshotPath: string | null = event.screenshot_path;
+  if (event.capture_id) {
+    try {
+      const ready = await new Promise<CaptureReadyEvent>((resolve) => {
+        pendingCapturesRef.current.set(event.capture_id, resolve);
+      });
+      imageBase64 = ready.image_base64;
+      screenshotPath = ready.screenshot_path ?? screenshotPath;
+    } catch (e) {
+      logError("enter.capture.failed", { capture_id: event.capture_id, error: serializeError(e) });
+      return;
+    }
+  }
+  if (!imageBase64) {
+    logInfo("enter.capture.skipped", { capture_id: event.capture_id, has_path: Boolean(screenshotPath) });
+    return;
+  }
+  await runAnalyzePipeline(
+    {
+      occurred_at: event.occurred_at,
+      app_name: event.app_name,
+      app_bundle_id: event.app_bundle_id,
+      is_send: event.is_send,
+      is_wechat: event.is_wechat,
+      screenshot_path: screenshotPath,
+    },
+    imageBase64,
+    onTaskCandidate,
+    event.entry_id,
+    { onDedupSuppressed, onPersonCreated },
+  );
 }
 
 // ---- Bubble ----
@@ -492,7 +572,19 @@ export default function Bubble() {
   const [isDragging, setIsDragging] = useState(false);
   const [autoCreateOnCountdown, setAutoCreateOnCountdown] = useState<boolean>(() => isTaskAutoCreateEnabled());
   const [suggestionCopied, setSuggestionCopied] = useState(false);
-  const aiCreditsAvailable = useAiCreditsAvailable();
+  const [byokReady, setByokReady] = useState(false);
+  useEffect(() => {
+    const sync = () => {
+      void isByokConfiguredAsync().then(setByokReady);
+    };
+    sync();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "percent.byok.config") sync();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+  const aiDisabled = !byokReady;
 
   // 派生：进队列的 progress 决定 bubble 是不是 busy（之前是顶层 busyAction state）
   const busyAction = active?.kind === "progress" ? active.action : null;
@@ -501,6 +593,10 @@ export default function Bubble() {
   const timerRef = useRef<number | null>(null); // task auto-create countdown
   const copyResetTimerRef = useRef<number | null>(null);
   const mockPreviewIdRef = useRef<string | null>(null);
+  // In-flight capture requests: capture_id → resolver. Populated when
+  // we invoke("capture_current_context") and drained by the
+  // listen("capture-ready") effect below.
+  const pendingCapturesRef = useRef<Map<string, (payload: CaptureReadyEvent) => void>>(new Map());
   const dragRef = useRef<{
     pointerId: number;
     x: number;
@@ -673,10 +769,27 @@ export default function Bubble() {
     const unlistenCount = listen<number>("count-updated", () => {
       animatePulse();
     });
+    const unlistenCaptureReady = listen<CaptureReadyEvent>("capture-ready", (e) => {
+      const { capture_id, image_base64, image_width, image_height, screenshot_path } = e.payload;
+      const resolver = pendingCapturesRef.current.get(capture_id);
+      if (!resolver) {
+        logWarn("capture-ready.unmatched", { capture_id });
+        return;
+      }
+      pendingCapturesRef.current.delete(capture_id);
+      logInfo("capture-ready.received", {
+        capture_id,
+        image_base64_chars: image_base64?.length ?? 0,
+        image_width,
+        image_height,
+        screenshot_path,
+      });
+      resolver(e.payload);
+    });
     const unlistenEnter = listen<EnterEvent>("enter-pressed", (e) => {
-      canUseAiCredits().then((allowed) => {
+      isByokConfiguredAsync().then((allowed) => {
         if (!allowed) return;
-        return processEnterEvent(e.payload, displayTaskCandidate, displayDedupSuppressed, (id, name) => {
+        return processEnterEvent(e.payload, pendingCapturesRef, displayTaskCandidate, displayDedupSuppressed, (id, name) => {
           enqueue({ kind: "toast_person_added", personId: id, name, durationMs: 3000 });
         });
       }).catch((err) =>
@@ -705,6 +818,7 @@ export default function Bubble() {
       clearAutoCreateTimer();
       clearCopyResetTimer();
       unlistenCount.then((f) => f());
+      unlistenCaptureReady.then((f) => f());
       unlistenEnter.then((f) => f());
       unlistenMockTask.then((f) => f());
       unlistenMockPreview.then((f) => f());
@@ -822,8 +936,14 @@ export default function Bubble() {
   const captureAndAnalyze = async (
     options: { detectTask?: boolean; fallbackAppName?: string } = {}
   ) => {
-    const captured = await captureCurrentScreen();
-    if (!captured) return null;
+    void logInfo("capture-request.start", { mode: "click", kind: options.detectTask ? "task" : "analyze" });
+    let captured: CapturedFrame;
+    try {
+      captured = await captureAsync(pendingCapturesRef);
+    } catch (e) {
+      logError("capture-request.failed", { error: serializeError(e) });
+      return null;
+    }
     const analyzed = await runAnalyzePipeline(
       {
         occurred_at: captured.occurred_at,
@@ -833,6 +953,7 @@ export default function Bubble() {
         is_wechat: captured.is_wechat,
         screenshot_path: captured.screenshot_path,
       },
+      captured.image_base64,
       displayTaskCandidate,
       undefined,
       {
@@ -850,258 +971,171 @@ export default function Bubble() {
 
   const generateReplySuggestion = async () => {
     if (isBusy) return;
-    if (!(await canUseAiCredits())) return;
+    if (!(await isByokConfiguredAsync())) return;
     setActionMenuOpen(false);
+
+    // Show progress UI immediately — no awaits before this so the user
+    // gets visible feedback the instant the click registers.
     const progressId = enqueue({ kind: "progress", action: "reply" });
     const traceId = logNewTraceId();
     logInfo("reply.start", { trace_id: traceId });
-    // Yield to the browser so the progress UI can paint before we kick off
-    // the long-running screencapture + LLM call. Otherwise the user sees a
-    // brief freeze (spinning beachball on macOS) between the menu click
-    // and any visible feedback.
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-    // Fire-and-forget: persist the chat turn + messages for this
-    // exchange. Done in parallel with the suggest call so it doesn't
-    // add latency to the reply panel. The dedup / task_candidate
-    // signals from this analyze call are intentionally ignored — reply
-    // is read-only — but the contact + chat history it writes lets
-    // the People page surface newly-identified contacts.
-    void captureAndAnalyze({ detectTask: false }).catch((e) => {
-      logWarn("reply.persist_failed", { trace_id: traceId, error: String(e) });
-    });
-
-    try {
-      // 1. 抓屏（同 capture 流程）
-      const captured = await captureCurrentScreen();
-      if (!captured) {
-        logWarn("reply.no_capture", { trace_id: traceId });
-        showSuggestionPanel({
-          title: "Couldn't generate",
-          description: "No screenshot or analysis result. Check screen recording permission.",
-          error: true,
-        });
-        return;
-      }
-
-      // 2. 建 log (本地 sqlite)
-      let logId: string;
+    // Run the rest in the background. The capture_async invoke returns
+    // in ~30ms (just osascript + uuid), then we wait for the capture-ready
+    // event from the Rust worker thread, then call the LLM.
+    void (async () => {
       try {
-        const { createLog } = await import("@/db/logs");
-        const log = await createLog({
-          occurredAt: captured.occurred_at,
-          appName: captured.app_name,
-          appBundleId: captured.app_bundle_id,
-          isSend: captured.is_send,
-          isWechat: captured.is_wechat,
-          screenshotPath: captured.screenshot_path ?? null,
+        // Fire-and-forget: persist the chat turn + messages for this
+        // exchange. Done in parallel with the suggest call so it doesn't
+        // add latency to the reply panel.
+        void captureAndAnalyze({ detectTask: false }).catch((e) => {
+          logWarn("reply.persist_failed", { trace_id: traceId, error: String(e) });
         });
-        logId = log.id;
-      } catch (e) {
-        logError("reply.logs.error", { trace_id: traceId, error: serializeError(e) });
-        showSuggestionPanel({
-          title: "Couldn't generate",
-          description: "Failed to record log.",
-          error: true,
-        });
-        return;
-      }
 
-      if (!captured.screenshot_path) {
-        logWarn("reply.no_screenshot", { trace_id: traceId, log_id: logId });
-        showSuggestionPanel({
-          title: "Couldn't generate",
-          description: "No screenshot — check screen recording permission.",
-          error: true,
+        // 1. 异步等 capture-ready
+        const captured = await captureAsync(pendingCapturesRef);
+        logInfo("reply.capture.received", {
+          trace_id: traceId,
+          capture_id: captured.capture_id,
+          image_base64_chars: captured.image_base64.length,
         });
-        return;
-      }
 
-      // 3. 读 resize 后的图片 base64
-      let imageBase64: string;
-      try {
-        imageBase64 = await imagePathToBase64(captured.screenshot_path);
-      } catch (e) {
-        logError("reply.screenshot.read.error", { trace_id: traceId, log_id: logId, error: serializeError(e) });
-        showSuggestionPanel({
-          title: "Couldn't generate",
-          description: "Failed to read screenshot.",
-          error: true,
+        // 2. 建 log
+        let logId: string;
+        try {
+          const { createLog } = await import("@/db/logs");
+          const log = await createLog({
+            occurredAt: captured.occurred_at,
+            appName: captured.app_name,
+            appBundleId: captured.app_bundle_id,
+            isSend: captured.is_send,
+            isWechat: captured.is_wechat,
+            screenshotPath: captured.screenshot_path ?? null,
+          });
+          logId = log.id;
+        } catch (e) {
+          logError("reply.logs.error", { trace_id: traceId, error: serializeError(e) });
+          showSuggestionPanel({
+            title: "Couldn't generate",
+            description: "Failed to record log.",
+            error: true,
+          });
+          return;
+        }
+
+        // 3. 一次 LLM 调用：extract + replies
+        const startedAt = performance.now();
+        const suggestData = await callSuggest({
+          person_name: undefined,
+          recent_messages: [],
+          image_base64: captured.image_base64,
+        }).catch((e) => {
+          logError("reply.suggest.request.failed", {
+            trace_id: traceId,
+            log_id: logId,
+            error: String(e),
+          });
+          return null;
         });
-        return;
-      }
-
-      // 4. 一次 LLM 调用：extract + replies (走 server /chat with suggest prompt)
-      logInfo("reply.suggest.request.start", { trace_id: traceId, log_id: logId, image_base64_chars: imageBase64.length });
-      const startedAt = performance.now();
-      const suggestData = await callSuggest({
-        person_name: undefined,
-        recent_messages: [],
-        image_base64: imageBase64,
-      }).catch((e) => {
-        logError("reply.suggest.request.failed", {
+        if (!suggestData?.text) {
+          showSuggestionPanel({
+            title: "Couldn't generate",
+            description: "The AI didn't return a usable suggestion.",
+            error: true,
+          });
+          return;
+        }
+        let result: {
+          replies?: { steady?: string; casual?: string; short?: string; recommend?: string };
+          labels?: Record<SuggestStyle, { cn: string; en: string }>;
+        };
+        try {
+          const m = suggestData.text.match(/\{[\s\S]*\}/);
+          result = JSON.parse(m ? m[0] : suggestData.text);
+        } catch {
+          logWarn("reply.suggest.parse_failed", { trace_id: traceId, raw: suggestData.text.slice(0, 200) });
+          showSuggestionPanel({
+            title: "Couldn't generate",
+            description: "The AI didn't return a usable suggestion.",
+            error: true,
+          });
+          return;
+        }
+        logInfo("reply.suggest.request.success", {
           trace_id: traceId,
           log_id: logId,
-          error: String(e),
+          has_replies: Boolean(result.replies),
+          duration_ms: Math.round(performance.now() - startedAt),
         });
-        return null;
-      });
-      if (!suggestData?.text) {
-        showSuggestionPanel({
-          title: "Couldn't generate",
-          description: "The AI didn't return a usable suggestion.",
-          error: true,
-        });
-        return;
-      }
-      // The server /chat endpoint returns the raw LLM text — parse the
-      // `{ replies: { steady, casual, short } }` JSON shape defined in
-      // the SUGGEST_TRIO_SYSTEM_PROMPT.
-      let result: {
-        replies?: { steady?: string; casual?: string; short?: string; recommend?: string };
-        labels?: Record<SuggestStyle, { cn: string; en: string }>;
-      };
-      try {
-        const m = suggestData.text.match(/\{[\s\S]*\}/);
-        result = JSON.parse(m ? m[0] : suggestData.text);
-      } catch {
-        logWarn("reply.suggest.parse_failed", { trace_id: traceId, raw: suggestData.text.slice(0, 200) });
-        showSuggestionPanel({
-          title: "Couldn't generate",
-          description: "The AI didn't return a usable suggestion.",
-          error: true,
-        });
-        return;
-      }
-      logInfo("reply.suggest.request.success", {
-        trace_id: traceId,
-        log_id: logId,
-        has_replies: Boolean(result.replies),
-        duration_ms: Math.round(performance.now() - startedAt),
-      });
 
-      if (!result.replies) {
-        showSuggestionPanel({
-          title: "Couldn't generate",
-          description: "The AI didn't return a usable suggestion.",
-          error: true,
-        });
-        return;
-      }
-
-      const replies: Record<SuggestStyle, string> = {
-        recommend: result.replies.recommend ?? result.replies.steady ?? "",
-        steady: result.replies.steady ?? result.replies.recommend ?? "",
-        casual: result.replies.casual ?? "",
-      };
-      const labels = result.labels ?? (STYLE_LABEL_CN as never);
-      const personNameResolved = "对方";
-      const defaultStyle: SuggestStyle = "recommend";
-      const firstReply = replies[defaultStyle]?.trim() ?? "";
-
-      if (!firstReply || !replies.recommend || !replies.steady || !replies.casual) {
-        logWarn("reply.suggest.empty", { trace_id: traceId });
-        showSuggestionPanel({
-          title: "Couldn't generate",
-          description: "The AI didn't return a usable suggestion.",
-          error: true,
-        });
-        return;
-      }
-
-      // 6. 写剪贴板
-      const writeClipboard = isReplyWriteClipboardEnabled();
-      if (writeClipboard) {
-        try {
-          await writeText(firstReply);
-          logInfo("reply.clipboard.write.success", { trace_id: traceId, style: defaultStyle, chars: firstReply.length });
-        } catch (e) {
-          logError("reply.clipboard.write.error", { trace_id: traceId, error: serializeError(e) });
+        if (!result.replies) {
+          showSuggestionPanel({
+            title: "Couldn't generate",
+            description: "The AI didn't return a usable suggestion.",
+            error: true,
+          });
+          return;
         }
-      } else {
-        logInfo("reply.clipboard.write.skipped", { trace_id: traceId, reason: "setting_disabled" });
-      }
 
-      showSuggestionPanel({
-        title: writeClipboard ? "Reply copied" : "Suggestion ready",
-        description: writeClipboard
-          ? `和 ${personNameResolved} 的对话 · 切换风格会自动重写剪贴板`
-          : `和 ${personNameResolved} 的对话 · 剪贴板未开，从屏幕读`,
-        replies,
-        styleLabels: labels as Record<SuggestStyle, { cn: string; en: string }>,
-        activeStyle: defaultStyle,
-        personName: personNameResolved,
-      });
-      void recordAiEvent("reply_suggestion", {
-        refId: logId,
-        metadata: { write_clipboard: writeClipboard },
-      });
-    } catch (e) {
-      logError("reply.error", { trace_id: traceId, error: serializeError(e) });
-      showSuggestionPanel({
-        title: "Couldn't generate",
-        description: "Something went wrong — check the console.",
-        error: true,
-      });
-    } finally {
-      dismiss(progressId);
-    }
-  };
+        const replies: Record<SuggestStyle, string> = {
+          recommend: result.replies.recommend ?? result.replies.steady ?? "",
+          steady: result.replies.steady ?? result.replies.recommend ?? "",
+          casual: result.replies.casual ?? "",
+        };
+        const labels = result.labels ?? (STYLE_LABEL_CN as never);
+        const personNameResolved = "对方";
+        const defaultStyle: SuggestStyle = "recommend";
+        const firstReply = replies[defaultStyle]?.trim() ?? "";
 
-  const captureTaskCandidate = async () => {
-    if (isBusy) return;
-    if (!(await canUseAiCredits())) return;
-    setActionMenuOpen(false);
-    const progressId = enqueue({ kind: "progress", action: "task" });
-    const traceId = logNewTraceId();
-    logInfo("capture_task.start", { trace_id: traceId });
-    // See generateReplySuggestion — give React a frame to paint the
-    // progress UI before we hit the screencapture path.
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    try {
-      void recordAiEvent("task_detection", { metadata: { source: "capture_task" } });
-      const result = await captureAndAnalyze({ detectTask: true });
-      if (!result) {
-        logWarn("capture_task.no_capture", { trace_id: traceId });
+        if (!firstReply || !replies.recommend || !replies.steady || !replies.casual) {
+          logWarn("reply.suggest.empty", { trace_id: traceId });
+          showSuggestionPanel({
+            title: "Couldn't generate",
+            description: "The AI didn't return a usable suggestion.",
+            error: true,
+          });
+          return;
+        }
+
+        // 4. 写剪贴板
+        const writeClipboard = isReplyWriteClipboardEnabled();
+        if (writeClipboard) {
+          try {
+            await writeText(firstReply);
+            logInfo("reply.clipboard.write.success", { trace_id: traceId, style: defaultStyle, chars: firstReply.length });
+          } catch (e) {
+            logError("reply.clipboard.write.error", { trace_id: traceId, error: serializeError(e) });
+          }
+        } else {
+          logInfo("reply.clipboard.write.skipped", { trace_id: traceId, reason: "setting_disabled" });
+        }
+
         showSuggestionPanel({
-          title: "Capture failed",
+          title: writeClipboard ? "Reply copied" : "Suggestion ready",
+          description: writeClipboard
+            ? `和 ${personNameResolved} 的对话 · 切换风格会自动重写剪贴板`
+            : `和 ${personNameResolved} 的对话 · 剪贴板未开，从屏幕读`,
+          replies,
+          styleLabels: labels as Record<SuggestStyle, { cn: string; en: string }>,
+          activeStyle: defaultStyle,
+          personName: personNameResolved,
+        });
+        void recordAiEvent("reply_suggestion", {
+          refId: logId,
+          metadata: { write_clipboard: writeClipboard },
+        });
+      } catch (e) {
+        logError("reply.error", { trace_id: traceId, error: serializeError(e) });
+        showSuggestionPanel({
+          title: "Couldn't generate",
           description: "No screenshot or analysis result. Check screen recording permission.",
           error: true,
         });
-        return;
+      } finally {
+        dismiss(progressId);
       }
-      if (!result.analyzed.result.task_candidate) {
-        const messageCount = result.analyzed.result.messages?.length ?? 0;
-        logInfo("capture_task.no_candidate", {
-          trace_id: traceId,
-          message_count: messageCount,
-          skipped_duplicate: false,
-        });
-        showSuggestionPanel({
-          title: "No to-do detected",
-          description:
-            messageCount === 0
-              ? "No new chat messages were detected in this screenshot."
-              : "The chat was captured, but no clear to-do was found in the new messages.",
-        });
-      } else {
-        logInfo("capture_task.candidate_shown", {
-          trace_id: traceId,
-          title: result.analyzed.result.task_candidate.title,
-        });
-      }
-    } catch (e) {
-      logError("capture_task.error", { trace_id: traceId, error: serializeError(e) });
-      showSuggestionPanel({
-        title: "Capture failed",
-        description: "Something went wrong — check the console.",
-        error: true,
-      });
-    } finally {
-      dismiss(progressId);
-    }
+    })();
   };
-
 
   const handleDragStart = (event: React.PointerEvent) => {
     if (event.button !== 0) return;
@@ -1196,10 +1230,10 @@ export default function Bubble() {
   }, [actionMenuOpen]);
 
   const handleActionMenu = (key: ActionKey) => {
-    if (key !== "main" && !aiCreditsAvailable) return;
+    if (key !== "main" && aiDisabled) return;
     switch (key) {
       case "agent":
-        void canUseAiCredits().then((allowed) => {
+        void isByokConfiguredAsync().then((allowed) => {
           if (!allowed) return;
           return invoke("show_chat_window");
         }).catch((e) =>
@@ -1214,9 +1248,6 @@ export default function Bubble() {
         // clicking the menu item and any visible feedback.
         requestAnimationFrame(() => void generateReplySuggestion());
         break;
-      case "task":
-        requestAnimationFrame(() => void captureTaskCandidate());
-        break;
       case "main":
         void openMainWindow();
         break;
@@ -1226,9 +1257,7 @@ export default function Bubble() {
   const progressCopy =
     busyAction === "reply"
       ? { title: "Drafting reply", description: "Capturing the screen and generating a reply..." }
-      : busyAction === "task"
-        ? { title: "Capturing task", description: "Scanning the screen for to-dos..." }
-        : null;
+      : null;
 
   return (
     <div
@@ -1243,7 +1272,7 @@ export default function Bubble() {
           ref={actionMenuRef}
           onAction={handleActionMenu}
           busy={busyAction}
-          aiDisabled={!aiCreditsAvailable}
+          aiDisabled={aiDisabled}
         />
       )}
 

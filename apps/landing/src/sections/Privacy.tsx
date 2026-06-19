@@ -18,9 +18,9 @@ export function Privacy() {
               </span>
             </h2>
             <p className="mt-5 max-w-md text-pretty text-[16px] leading-relaxed text-muted-foreground">
-              账号登录走 Better Auth / Neon。
-              <strong className="font-medium text-foreground">业务聊天数据</strong>
-              一个字节都不上云 —— 你随时可以打开 Finder 看那张 .db。
+              默认 BYOK —— 客户端直连你配置的 LLM provider，
+              <strong className="font-medium text-foreground">聊天 / 任务 / 截图 / API key</strong>
+              一个字节都不上 Percent 的服务器。你随时可以打开 Finder 看那张 .db。
             </p>
 
             <ul className="mt-10 space-y-5 text-[14px]">
@@ -34,7 +34,8 @@ export function Privacy() {
                 / tasks），snowflake id
               </Bullet>
               <Bullet icon={<Network size={14} strokeWidth={1.75} />}>
-                唯一的外发请求：截图 + 聊天文本 → Moonshot (kimi-k2.6)，用于抽 chat 与起回复
+                外发请求只到你的 LLM provider（OpenAI / Anthropic / Moonshot / MiniMax 等）——
+                Tauri Rust 侧绕过 WebView CORS，URL 白名单在 capabilities 里
               </Bullet>
             </ul>
           </header>

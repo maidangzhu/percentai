@@ -15,18 +15,15 @@ import { EmptyState } from "@/components/EmptyState";
 import { cn, formatNumber } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
 import { openLanding } from "@/lib/landing";
-import type { AuthUser, UserStats } from "@/lib/types";
+import type { UserStats } from "@/lib/types";
 
 export function HomeView({
-  user,
   stats,
   loading,
 }: {
-  user: AuthUser;
   stats: UserStats | null;
   loading: boolean;
 }) {
-  const displayName = user.name?.trim() || user.email.split("@")[0] || "你";
   const lastActive = stats?.last_active_at
     ? formatDateTime(stats.last_active_at, "从未")
     : "从未";
@@ -35,7 +32,7 @@ export function HomeView({
     <div className="flex h-full flex-col">
       <PageHeader
         eyebrow="Home"
-        title={`你好，${displayName}`}
+        title="你好"
         description="Percent 正在你的 macOS 上安静地记东西。下面是它目前攒下的所有数据。"
         meta={
           <div className="flex items-center gap-5">
@@ -147,14 +144,8 @@ export function HomeView({
             </section>
 
             <section>
-              <SectionLabel index="03" title="消耗" />
-              <div className="mt-3 grid gap-px overflow-hidden rounded-xl border border-border/60 bg-border/40 sm:grid-cols-3">
-                <UsageCard
-                  label="Credits used"
-                  value={stats.credits_used}
-                  hint="历史总扣点（不计入注册赠送）"
-                  mono
-                />
+              <SectionLabel index="03" title="状态" />
+              <div className="mt-3 grid gap-px overflow-hidden rounded-xl border border-border/60 bg-border/40 sm:grid-cols-2">
                 <UsageCard
                   label="待办任务"
                   value={stats.tasks.pending}

@@ -105,13 +105,22 @@ export const PROVIDER_PRESETS: Record<ProviderId, ProviderPreset> = {
     api: "openai-completions",
     // baseUrl 留空，强制用户填：MiniMax 有国内 / 国际两个 endpoint，且历史上变过
     baseUrl: "",
-    defaultModelId: "MiniMax-Text-01",
-    defaultModelName: "MiniMax Text 01",
+    defaultModelId: "MiniMax-M3",
+    defaultModelName: "MiniMax M3",
     multimodal: true,
-    reasoning: false,
-    contextWindow: 128000,
+    reasoning: true,
+    contextWindow: 1000000,
     maxTokens: 8192,
+    // pi-ai's openai-completions parser doesn't understand M3's
+    // `reasoning_details[]` array, so we route MiniMax-M3 through a custom
+    // `streamMiniMax` in index.ts instead of using pi-ai's built-in flow.
+    // The `requiresThinkingAsText: false` here only matters if a user
+    // picks a non-M3 MiniMax model (Text-01 / VL-01).
+    compat: {
+      requiresThinkingAsText: false,
+    },
     suggestedModels: [
+      { id: "MiniMax-M3", name: "MiniMax M3 (multimodal, recommended)" },
       { id: "MiniMax-Text-01", name: "MiniMax Text 01" },
       { id: "MiniMax-VL-01", name: "MiniMax VL 01" },
     ],

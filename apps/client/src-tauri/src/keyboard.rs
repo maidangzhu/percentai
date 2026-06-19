@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
 use crate::frontapp::{get_frontmost_app, is_send_action};
-use crate::screenshotter::capture_screen_without_bubble;
+use crate::screenshotter::{capture_context_metadata, spawn_capture_pipeline};
 use crate::AppState;
 
 const WECHAT_BUNDLE_ID: &str = "com.tencent.xinWeChat";
@@ -56,8 +56,11 @@ pub struct EnterEvent {
     pub app_bundle_id: String,
     pub is_send: bool,
     pub is_wechat: bool,
-    /// 截图文件的绝对路径，仅在微信 & 截图开关开启时有值
+    /// PNG audit 路径 —— capture 跑完时由 capture-ready 事件携带回填。
+    /// 这个字段在 enter-pressed 时是 None。
     pub screenshot_path: Option<String>,
+    /// capture_id。前端拿这个去 listen("capture-ready") 异步等图。
+    pub capture_id: String,
 }
 
 pub fn start_keyboard_listener(app_handle: tauri::AppHandle) {
@@ -195,31 +198,32 @@ fn handle_enter_pressed(app_handle: &tauri::AppHandle) {
 
     let screenshot_enabled = state.screenshot_enabled.load(Ordering::SeqCst);
 
-    // 如果是微信 & 截图开关打开，先截图再 emit（截图很快，<200ms）
-    // 否则直接 emit
+    // 如果是微信 & 截图开关打开，发 enter-pressed (空 payload + capture_id)
+    // + 后台 spawn capture 任务，跑完 emit("capture-ready")。
+    // 否则直接 emit enter-pressed (capture_id = "") — 前端不会去 listen。
     if is_wechat && screenshot_enabled {
         let log_dir = state.log_dir.clone();
         let app_handle_clone = app_handle.clone();
-        let app_name = front.name.clone();
-        let bundle_id = front.bundle_id.clone();
 
         thread::spawn(move || {
-            let screenshot_path = capture_screen_without_bubble(&app_handle_clone, &log_dir)
-                .map(|p| p.to_string_lossy().to_string());
-
-            eprintln!("[keyboard] screenshot: {:?}", screenshot_path);
-
+            let ctx = capture_context_metadata(&app_handle_clone);
             let event = EnterEvent {
                 entry_id,
-                occurred_at,
-                app_name,
-                app_bundle_id: bundle_id,
-                is_send,
-                is_wechat: true,
-                screenshot_path,
+                occurred_at: ctx.occurred_at,
+                app_name: ctx.app_name,
+                app_bundle_id: ctx.app_bundle_id,
+                is_send: ctx.is_send,
+                is_wechat: ctx.is_wechat,
+                screenshot_path: None,
+                capture_id: ctx.capture_id.clone(),
             };
 
+            // 立刻 emit enter-pressed，前端可以开始 UI 工作（写入 log / 排队）
             let _ = app_handle_clone.emit("enter-pressed", &event);
+
+            // 后台跑 capture，跑完 emit capture-ready
+            spawn_capture_pipeline(app_handle_clone.clone(), ctx.capture_id, log_dir);
+
             let count = {
                 let state = app_handle_clone.state::<AppState>();
                 let store = state.log_store.lock().unwrap();
@@ -236,6 +240,7 @@ fn handle_enter_pressed(app_handle: &tauri::AppHandle) {
             is_send,
             is_wechat,
             screenshot_path: None,
+            capture_id: String::new(),
         };
         let _ = app_handle.emit("enter-pressed", &event);
         let count = {

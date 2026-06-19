@@ -1,27 +1,36 @@
-// Thin client for the server's `/chat` LLM proxy route.
+// BYOK LLM client. The previous version was a thin wrapper around a server
+// `/chat` proxy — that endpoint is gone, replaced by direct calls to the
+// provider from the client, using the user's saved BYOK key.
 //
-// The server holds the provider API key in env (LLM_API_KEY or
-// per-provider like KIMI_API_KEY / OPENAI_API_KEY). The client NEVER
-// sees or sends the key — it just composes a prompt + messages and
-// the server forwards to the provider.
+// Three facades are kept (callAnalyze / callSuggest / callAgent) so the
+// existing callers in `bubble.tsx` and `bubble/useChatWindow.ts` don't have
+// to know which system prompt to use. They all dispatch through
+// `streamPercentDirect` from `@percent/runtime`, which picks the right
+// transport (custom M3 adapter for MiniMax-M3, pi-ai's own stream for
+// everything else).
 //
-// Three facades (callAnalyze / callSuggest / callAgent) are kept so
-// existing callers don't need to know which system prompt to use.
-// They all dispatch to the same /chat endpoint, just with different
-// prompts and message shapes.
+// CORS: we pass `tauri-plugin-http`'s `fetch` explicitly to
+// `streamPercentDirect`. This is what allows us to talk to providers like
+// api.anthropic.com that reject WebView origins — the request is
+// forwarded to the Rust process (reqwest) instead of going through the
+// WebView's network stack.
 
-import { API_BASE } from "@/lib/types";
-import { authFetch } from "@/lib/auth";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import {
+  buildProviderModel,
+  streamPercentDirect,
+  type Context,
+  type Message as RuntimeMessage,
+  type ImageContent,
+} from "@percent/runtime";
+
 import {
   SCREENSHOT_ANALYZE_SYSTEM_PROMPT,
   SUGGEST_TRIO_SYSTEM_PROMPT,
 } from "@/lib/prompts";
+import { loadByokConfig, loadByokKey } from "@/lib/byokConfig";
 
 export type LlmProvider = "kimi" | "openai" | "deepseek" | "anthropic" | "google" | "minimax";
-
-// Re-export the runtime's `ImageContent` type so callers can build
-// multimodal messages without depending on the runtime directly.
-import type { ImageContent } from "@percent/runtime";
 
 export type ContentBlock =
   | { type: "text"; text: string }
@@ -32,72 +41,128 @@ export interface ChatMessage {
   content: string | ContentBlock[];
 }
 
-// ── raw transport ───────────────────────────────────────────────
-
-async function post<T>(url: string, body: unknown): Promise<T> {
-  const resp = await authFetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`POST ${url} failed: ${resp.status} ${text.slice(0, 200)}`);
+class ByokNotConfiguredError extends Error {
+  constructor() {
+    super("BYOK is not configured — open Settings and add a provider key");
+    this.name = "ByokNotConfiguredError";
   }
-  const json = (await resp.json()) as { code: number; message: string; data: T };
-  if (!json.data) throw new Error(`POST ${url} returned no data`);
-  return json.data;
+}
+
+interface ByokModel {
+  model: ReturnType<typeof buildProviderModel>;
+  apiKey: string;
+}
+
+async function resolveByokModel(): Promise<ByokModel> {
+  const config = loadByokConfig();
+  const apiKey = await loadByokKey();
+  if (!apiKey) throw new ByokNotConfiguredError();
+  const model = buildProviderModel({
+    provider: config.provider,
+    modelId: config.modelId,
+    modelName: config.modelName,
+    baseUrl: config.baseUrl,
+  });
+  return { model, apiKey };
+}
+
+/**
+ * Convert our `ChatMessage[]` to the runtime's `Message[]` shape that
+ * `streamPercentDirect` expects. Strings become plain user text; content
+ * arrays pass through (the runtime's image block format is fine for
+ * openai-completions since we serialize it to `image_url` data URIs in
+ * `streamMiniMax` and via pi-ai's `convertMessages` for everyone else).
+ */
+function toRuntimeMessages(messages: ChatMessage[]): RuntimeMessage[] {
+  return messages.map((m): RuntimeMessage => {
+    if (m.role === "user") {
+      return {
+        role: "user",
+        content: m.content,
+        timestamp: Date.now(),
+      };
+    }
+    if (m.role === "system") {
+      return {
+        role: "user", // pi-ai's Context already has `systemPrompt`; the system
+                     // content gets folded into the user prompt by the model.
+        content: typeof m.content === "string" ? m.content : "",
+        timestamp: Date.now(),
+      };
+    }
+    // m.role === "assistant": only safe to forward if we have a full
+    // AssistantMessage; for one-shot facades we just turn it into a
+    // user-role echo so the model sees its prior reply in context.
+    return {
+      role: "user",
+      content: typeof m.content === "string" ? m.content : "",
+      timestamp: Date.now(),
+    };
+  });
+}
+
+function buildContext(systemPrompt: string | undefined, messages: ChatMessage[]): Context {
+  return {
+    systemPrompt,
+    messages: toRuntimeMessages(messages),
+  };
+}
+
+/** Drive a stream to completion and return the concatenated text + the
+ *  final stopReason. */
+async function collectStreamText(
+  apiKey: string,
+  model: ReturnType<typeof buildProviderModel>,
+  context: Context,
+  options: { disableThinking?: boolean; signal?: AbortSignal } = {},
+): Promise<{ text: string; stopReason: string }> {
+  const events = streamPercentDirect(model, context, {
+    apiKey,
+    signal: options.signal,
+    disableThinking: options.disableThinking,
+    fetch: tauriFetch as unknown as typeof globalThis.fetch,
+  });
+  let text = "";
+  let stopReason = "error";
+  for await (const event of events) {
+    if (event.type === "text_delta") {
+      text += event.delta;
+    } else if (event.type === "done") {
+      stopReason = event.reason;
+    } else if (event.type === "error") {
+      stopReason = event.reason;
+      // Surface the upstream error message verbatim.
+      if (event.error.errorMessage) {
+        throw new Error(event.error.errorMessage);
+      }
+    }
+  }
+  return { text, stopReason };
 }
 
 export interface CallChatArgs {
   systemPrompt?: string;
   messages: ChatMessage[];
-  provider?: LlmProvider;
-  modelId?: string;
-  baseUrl?: string;
-  /** convenience: top-level base64 image that the server folds into the
-   *  first user message. Newer callers should pass the image inline in
-   *  the `messages` content block instead. */
-  imageBase64?: string;
-  imageMime?: string;
+  disableThinking?: boolean;
+  signal?: AbortSignal;
 }
 
-/** Low-level call: just hit /chat with whatever prompt + messages you want.
- *  The server picks up the API key from env — no key is sent in the body. */
+/** Low-level BYOK call. Streams the model response and returns the
+ *  concatenated text. */
 export async function callChat(args: CallChatArgs): Promise<{ text: string }> {
-  const {
-    systemPrompt,
-    messages,
-    provider,
-    modelId,
-    baseUrl,
-    imageBase64,
-    imageMime,
-  } = args;
-  const payload: Record<string, unknown> = {
-    system_prompt: systemPrompt,
-    messages,
-    model_id: modelId,
-    base_url: baseUrl,
-    image_base64: imageBase64,
-    image_mime: imageMime,
-  };
-  if (provider) payload.provider = provider;
-  return post<{ text: string }>(`${API_BASE}/chat`, payload);
+  const { model, apiKey } = await resolveByokModel();
+  const ctx = buildContext(args.systemPrompt, args.messages);
+  const { text } = await collectStreamText(apiKey, model, ctx, {
+    disableThinking: args.disableThinking,
+    signal: args.signal,
+  });
+  return { text };
 }
 
 // ── facades ─────────────────────────────────────────────────────
 
 /** Build the user message for the analyze flow — folds the screenshot into
- *  the first user message's content array so the LLM sees text + image.
- *
- *  Image blocks use the OpenAI /chat completions shape (the runtime
- *  routes OpenAI-compatible providers through this same format). The
- *  previous `{ type: "image", data, mimeType }` shape is the runtime's
- *  internal `ImageContent` type and doesn't survive the wire trip to
- *  most providers — the LLM silently ignores the image and answers
- *  "Unknown" because it never sees the screenshot.
- */
+ *  the first user message's content array so the LLM sees text + image. */
 function buildAnalyzeUserMessage(
   log: {
     id?: string;
@@ -134,12 +199,7 @@ Log id: ${log.id ?? "(none)"}`;
   };
 }
 
-/**
- * Screenshot → structured task candidate.
- * Passes the screenshot + recent context to the LLM via `/chat` with the
- * SCREENSHOT_ANALYZE_SYSTEM_PROMPT. Returns the raw LLM text — the caller
- * is responsible for JSON.parse + validation.
- */
+/** Screenshot → structured task candidate. */
 export async function callAnalyze(req: {
   log: {
     id?: string;
@@ -154,10 +214,8 @@ export async function callAnalyze(req: {
   recent_people?: Array<{ id: string; name: string }>;
   recent_tasks?: Array<{ id: string; title: string }>;
   recent_messages?: Array<{ role: "self" | "other"; content: string }>;
-  provider?: LlmProvider;
-  modelId?: string;
 }): Promise<{ text: string }> {
-  const { log, image_base64, recent_people, recent_tasks, recent_messages, provider, modelId } = req;
+  const { log, image_base64, recent_people, recent_tasks, recent_messages } = req;
   const messages = [
     buildAnalyzeUserMessage(
       log,
@@ -167,21 +225,17 @@ export async function callAnalyze(req: {
       recent_messages ?? [],
     ),
   ];
-  return callChat({ systemPrompt: SCREENSHOT_ANALYZE_SYSTEM_PROMPT, messages, provider, modelId });
+  return callChat({ systemPrompt: SCREENSHOT_ANALYZE_SYSTEM_PROMPT, messages, disableThinking: true });
 }
 
-/**
- * Chat context → 3 reply variants (steady / casual / short).
- * Returns the raw LLM text — the caller parses the JSON `replies` shape.
- */
+/** Chat context → 3 reply variants (steady / casual / short).
+ *  Returns the raw LLM text — the caller parses the JSON `replies` shape. */
 export async function callSuggest(req: {
   person_name?: string;
   recent_messages: Array<{ role: "self" | "other"; content: string }>;
   image_base64?: string;
-  provider?: LlmProvider;
-  modelId?: string;
 }): Promise<{ text: string }> {
-  const { person_name, recent_messages, image_base64, provider, modelId } = req;
+  const { person_name, recent_messages, image_base64 } = req;
   const ctx = `Person: ${person_name ?? "unknown"}
 Recent messages:
 ${recent_messages.map((m) => `- [${m.role}] ${m.content}`).join("\n")}`;
@@ -196,21 +250,19 @@ ${recent_messages.map((m) => `- [${m.role}] ${m.content}`).join("\n")}`;
         : ctx,
     },
   ];
-  return callChat({ systemPrompt: SUGGEST_TRIO_SYSTEM_PROMPT, messages, provider, modelId });
+  return callChat({ systemPrompt: SUGGEST_TRIO_SYSTEM_PROMPT, messages, disableThinking: true });
 }
 
-/**
- * Single LLM completion — used by ad-hoc / non-streamed flows. The runtime's
- * `createPercentAgent` already provides streaming for the agent window; this
- * facade is here so the legacy one-shot /agent caller (and tests) can keep
- * working against a single /chat endpoint.
- */
+/** Single LLM completion — used by ad-hoc flows. */
 export async function callAgent(req: {
   system_prompt?: string;
   messages: Array<{ role: "user" | "system"; content: string }>;
-  provider?: LlmProvider;
-  modelId?: string;
 }): Promise<{ text: string }> {
-  const { system_prompt, messages, provider, modelId } = req;
-  return callChat({ systemPrompt: system_prompt, messages, provider, modelId });
+  const { system_prompt, messages } = req;
+  return callChat({
+    systemPrompt: system_prompt,
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+  });
 }
+
+export { ByokNotConfiguredError };

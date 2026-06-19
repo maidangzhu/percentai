@@ -1,6 +1,5 @@
 export {
   Agent,
-  streamProxy,
   type AgentEvent,
   type AgentMessage,
   type AgentTool,
@@ -28,6 +27,7 @@ export {
   type ProviderId,
   type ProviderPreset,
 } from "./providers.js";
+export { streamMiniMax, type StreamMiniMaxOptions } from "./minimaxStream.js";
 
 import {
   Agent,
@@ -37,24 +37,16 @@ import {
   type StreamFn,
 } from "@earendil-works/pi-agent-core";
 import {
-  EventStream,
-  streamSimple as piStreamSimple,
-  completeSimple as piCompleteSimple,
-  type AssistantMessageEventStream as PiAssistantMessageEventStream,
-  type SimpleStreamOptions as PiSimpleStreamOptions,
-  parseStreamingJson,
   stream as piStream,
-  type AssistantMessage,
-  type AssistantMessageEvent,
   type AssistantMessageEventStream,
   type Context,
   type ImageContent,
   type Message,
   type Model,
-  type SimpleStreamOptions,
-  type StopReason,
-  type ToolCall,
+  type StreamOptions,
 } from "@earendil-works/pi-ai";
+
+import { streamMiniMax, type StreamMiniMaxOptions } from "./minimaxStream.js";
 
 export interface PercentModelOptions {
   id?: string;
@@ -84,298 +76,87 @@ export function createPercentModel(options: PercentModelOptions = {}): Model<"op
   };
 }
 
-export type PercentProxyEvent =
-  | { type: "start" }
-  | { type: "text_start"; contentIndex: number }
-  | { type: "text_delta"; contentIndex: number; delta: string }
-  | { type: "text_end"; contentIndex: number; contentSignature?: string }
-  | { type: "thinking_start"; contentIndex: number }
-  | { type: "thinking_delta"; contentIndex: number; delta: string }
-  | { type: "thinking_end"; contentIndex: number; contentSignature?: string }
-  | { type: "toolcall_start"; contentIndex: number; id: string; toolName: string }
-  | { type: "toolcall_delta"; contentIndex: number; delta: string }
-  | { type: "toolcall_end"; contentIndex: number }
-  | {
-      type: "done";
-      reason: Extract<StopReason, "stop" | "length" | "toolUse">;
-      usage: AssistantMessage["usage"];
-    }
-  | {
-      type: "error";
-      reason: Extract<StopReason, "aborted" | "error">;
-      errorMessage?: string;
-      usage: AssistantMessage["usage"];
-    };
-
-type PercentProxySerializableOptions = Pick<
-  SimpleStreamOptions,
-  | "temperature"
-  | "maxTokens"
-  | "reasoning"
-  | "cacheRetention"
-  | "sessionId"
-  | "headers"
-  | "metadata"
-  | "transport"
-  | "thinkingBudgets"
-  | "maxRetryDelayMs"
->;
-
-export interface PercentProxyStreamOptions extends PercentProxySerializableOptions {
+export interface StreamPercentDirectOptions {
+  apiKey: string;
   signal?: AbortSignal;
-  proxyUrl: string;
-  authToken?: string;
+  /** Forwarded to `streamMiniMax` when the model is MiniMax-M3. */
+  disableThinking?: boolean;
+  /**
+   * Custom fetch implementation. Pass
+   * `@tauri-apps/plugin-http`'s `fetch` in the Tauri WebView to bypass
+   * CORS. Without it, pi-ai's openai-completions stream falls back to
+   * `globalThis.fetch` (which is CORS-restricted).
+   */
+  fetch?: typeof globalThis.fetch;
+  [key: string]: unknown;
 }
 
-class PercentProxyMessageEventStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
-  constructor() {
-    super(
-      (event) => event.type === "done" || event.type === "error",
-      (event) => {
-        if (event.type === "done") return event.message;
-        if (event.type === "error") return event.error;
-        throw new Error("Unexpected event type");
-      },
-    );
-  }
-}
-
-function buildProxyRequestOptions(options: PercentProxyStreamOptions): PercentProxySerializableOptions {
-  return {
-    temperature: options.temperature,
-    maxTokens: options.maxTokens,
-    reasoning: options.reasoning,
-    cacheRetention: options.cacheRetention,
-    sessionId: options.sessionId,
-    headers: options.headers,
-    metadata: options.metadata,
-    transport: options.transport,
-    thinkingBudgets: options.thinkingBudgets,
-    maxRetryDelayMs: options.maxRetryDelayMs,
-  };
-}
-
-export function streamPercentProxy(
+/**
+ * BYOK direct stream entry point.
+ *
+ * Dispatches by `model.id`:
+ *   - MiniMax-M3 → `streamMiniMax` (custom adapter that understands M3's
+ *     `reasoning_details[]` and `thinking`/`reasoning_split` fields).
+ *   - everything else → pi-ai's own `stream()`, which routes by `model.api`
+ *     (`openai-completions` / `anthropic-messages` / `google-generative-ai` /
+ *     `mistral-conversations`).
+ *
+ * For CORS bypass in the Tauri WebView, pass `options.fetch =
+ * tauriPluginHttpFetch` (import `@tauri-apps/plugin-http` and use its
+ * `fetch` export). The default behaviour — using `globalThis.fetch` —
+ * is fine in Node / test environments but fails for providers that
+ * reject non-browser origins.
+ */
+export function streamPercentDirect(
   model: Model<any>,
   context: Context,
-  options: PercentProxyStreamOptions,
-): PercentProxyMessageEventStream {
-  const stream = new PercentProxyMessageEventStream();
-
-  void (async () => {
-    const partial: AssistantMessage = {
-      role: "assistant",
-      stopReason: "stop",
-      content: [],
-      api: model.api,
-      provider: model.provider,
-      model: model.id,
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      timestamp: Date.now(),
-    };
-
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-    const abortHandler = () => {
-      reader?.cancel("Request aborted by user").catch(() => {});
-    };
-    options.signal?.addEventListener("abort", abortHandler);
-
-    try {
-      const headers = new Headers({ "Content-Type": "application/json" });
-      if (options.authToken) {
-        headers.set("Authorization", `Bearer ${options.authToken}`);
-      }
-
-      const response = await fetch(`${options.proxyUrl}/agent/model/stream`, {
-        method: "POST",
-        credentials: "include",
-        headers,
-        body: JSON.stringify({
-          model,
-          context,
-          options: buildProxyRequestOptions(options),
-        }),
-        signal: options.signal,
-      });
-
-      if (!response.ok) {
-        let errorMessage = `Proxy error: ${response.status} ${response.statusText}`;
-        try {
-          const body = await response.json();
-          if (body && typeof body === "object" && typeof body.message === "string") {
-            errorMessage = `Proxy error: ${body.message}`;
-          }
-        } catch {
-          // Keep status message.
-        }
-        throw new Error(errorMessage);
-      }
-
-      if (!response.body) {
-        throw new Error("Proxy response body is empty");
-      }
-
-      reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (options.signal?.aborted) throw new Error("Request aborted by user");
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (!data) continue;
-          const event = processPercentProxyEvent(JSON.parse(data) as PercentProxyEvent, partial);
-          if (event) stream.push(event);
-        }
-      }
-
-      if (options.signal?.aborted) throw new Error("Request aborted by user");
-      stream.end();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      partial.stopReason = options.signal?.aborted ? "aborted" : "error";
-      partial.errorMessage = errorMessage;
-      stream.push({
-        type: "error",
-        reason: partial.stopReason,
-        error: partial,
-      });
-      stream.end();
-    } finally {
-      options.signal?.removeEventListener("abort", abortHandler);
-    }
-  })();
-
-  return stream;
-}
-
-function processPercentProxyEvent(
-  proxyEvent: PercentProxyEvent,
-  partial: AssistantMessage,
-): AssistantMessageEvent | undefined {
-  switch (proxyEvent.type) {
-    case "start":
-      return { type: "start", partial };
-    case "text_start":
-      partial.content[proxyEvent.contentIndex] = { type: "text", text: "" };
-      return { type: "text_start", contentIndex: proxyEvent.contentIndex, partial };
-    case "text_delta": {
-      const content = partial.content[proxyEvent.contentIndex];
-      if (content?.type !== "text") throw new Error("Received text_delta for non-text content");
-      content.text += proxyEvent.delta;
-      return { type: "text_delta", contentIndex: proxyEvent.contentIndex, delta: proxyEvent.delta, partial };
-    }
-    case "text_end": {
-      const content = partial.content[proxyEvent.contentIndex];
-      if (content?.type !== "text") throw new Error("Received text_end for non-text content");
-      content.textSignature = proxyEvent.contentSignature;
-      return { type: "text_end", contentIndex: proxyEvent.contentIndex, content: content.text, partial };
-    }
-    case "thinking_start":
-      partial.content[proxyEvent.contentIndex] = { type: "thinking", thinking: "" };
-      return { type: "thinking_start", contentIndex: proxyEvent.contentIndex, partial };
-    case "thinking_delta": {
-      const content = partial.content[proxyEvent.contentIndex];
-      if (content?.type !== "thinking") throw new Error("Received thinking_delta for non-thinking content");
-      content.thinking += proxyEvent.delta;
-      return { type: "thinking_delta", contentIndex: proxyEvent.contentIndex, delta: proxyEvent.delta, partial };
-    }
-    case "thinking_end": {
-      const content = partial.content[proxyEvent.contentIndex];
-      if (content?.type !== "thinking") throw new Error("Received thinking_end for non-thinking content");
-      content.thinkingSignature = proxyEvent.contentSignature;
-      return { type: "thinking_end", contentIndex: proxyEvent.contentIndex, content: content.thinking, partial };
-    }
-    case "toolcall_start":
-      partial.content[proxyEvent.contentIndex] = {
-        type: "toolCall",
-        id: proxyEvent.id,
-        name: proxyEvent.toolName,
-        arguments: {},
-        partialJson: "",
-      } as ToolCall & { partialJson: string };
-      return { type: "toolcall_start", contentIndex: proxyEvent.contentIndex, partial };
-    case "toolcall_delta": {
-      const content = partial.content[proxyEvent.contentIndex];
-      if (content?.type !== "toolCall") throw new Error("Received toolcall_delta for non-toolCall content");
-      const mutable = content as ToolCall & { partialJson?: string };
-      mutable.partialJson = `${mutable.partialJson ?? ""}${proxyEvent.delta}`;
-      mutable.arguments = parseStreamingJson(mutable.partialJson) ?? {};
-      partial.content[proxyEvent.contentIndex] = { ...mutable };
-      return { type: "toolcall_delta", contentIndex: proxyEvent.contentIndex, delta: proxyEvent.delta, partial };
-    }
-    case "toolcall_end": {
-      const content = partial.content[proxyEvent.contentIndex];
-      if (content?.type !== "toolCall") return undefined;
-      delete (content as ToolCall & { partialJson?: string }).partialJson;
-      return { type: "toolcall_end", contentIndex: proxyEvent.contentIndex, toolCall: content, partial };
-    }
-    case "done":
-      partial.stopReason = proxyEvent.reason;
-      partial.usage = proxyEvent.usage;
-      return { type: "done", reason: proxyEvent.reason, message: partial };
-    case "error":
-      partial.stopReason = proxyEvent.reason;
-      partial.errorMessage = proxyEvent.errorMessage;
-      partial.usage = proxyEvent.usage;
-      return { type: "error", reason: proxyEvent.reason, error: partial };
+  options: StreamPercentDirectOptions,
+): AssistantMessageEventStream {
+  if (!options.apiKey) {
+    throw new Error("streamPercentDirect requires apiKey (BYOK mode)");
   }
+  if (model.id === "MiniMax-M3") {
+    return streamMiniMax(model, context, {
+      apiKey: options.apiKey,
+      signal: options.signal,
+      disableThinking: options.disableThinking,
+      fetch: options.fetch,
+    } as StreamMiniMaxOptions);
+  }
+  return piStream(model, context, options as Parameters<typeof piStream>[2]);
 }
 
 export interface CreatePercentAgentOptions {
-  /** 必填：server proxy 路径（BYOK 不用但仍要传，作为 fallback） */
-  apiBase: string;
   sessionId?: string;
   systemPrompt: string;
   tools: AgentTool[];
   messages?: AgentMessage[];
   /**
-   * 默认 model（proxy 路径下用）。BYOK 路径下用 `model` 字段。
-   * 缺省用服务端配置的 OpenAI-compatible 主链路。
+   * Model to use. Built via `buildProviderModel` from the user's BYOK
+   * settings. Defaults to a placeholder OpenAI model.
    */
   model?: Model<any>;
+  /** BYOK provider key. Required. */
+  byokApiKey: string;
+  /** Forwarded to `streamMiniMax` when the model is MiniMax-M3. */
+  disableThinking?: boolean;
   /**
-   * BYOK 模式：直接用用户 key 调 provider，**不走 server proxy**。
-   * - `mode: "direct"` 必须配合 `byokApiKey` 使用
-   * - `mode: "proxy"`（默认）走 server 转发，由 server 计费扣 credits
+   * Custom fetch (typically `tauri-plugin-http`'s) for CORS bypass in the
+   * Tauri WebView. Forwarded to `streamPercentDirect`.
    */
-  mode?: "proxy" | "direct";
-  byokApiKey?: string;
-  authToken?: string;
+  fetch?: typeof globalThis.fetch;
   thinkingLevel?: ThinkingLevel;
 }
 
 export function createPercentAgent(options: CreatePercentAgentOptions): Agent {
   const model = options.model ?? createPercentModel();
-  const mode = options.mode ?? "proxy";
-  const streamFn: StreamFn =
-    mode === "direct"
-      ? ((directModel, context, streamOptions) =>
-          streamPercentDirect(directModel, context, {
-            ...streamOptions,
-            apiKey: options.byokApiKey ?? "",
-          })) as StreamFn
-      : ((proxyModel, context, streamOptions) =>
-          streamPercentProxy(proxyModel, context, {
-            ...streamOptions,
-            proxyUrl: options.apiBase,
-            authToken: options.authToken,
-          })) as StreamFn;
+  const streamFn: StreamFn = ((directModel, context, streamOptions) =>
+    streamPercentDirect(directModel, context, {
+      ...streamOptions,
+      apiKey: options.byokApiKey,
+      disableThinking: options.disableThinking,
+      fetch: options.fetch,
+    })) as StreamFn;
   return new Agent({
     initialState: {
       model,
@@ -388,27 +169,6 @@ export function createPercentAgent(options: CreatePercentAgentOptions): Agent {
     toolExecution: "parallel",
     streamFn,
   });
-}
-
-// 直连 provider 的流。
-// pi-ai 的 `stream<TApi>(model, context, options)` 按 model.api 自动选 provider 流函数
-// （openai-completions / anthropic-messages / google-generative-ai / mistral-conversations）。
-// 用户 key 通过 options.apiKey 传，pi-ai 内部会塞到对应 provider 的 Authorization 头。
-export interface StreamPercentDirectOptions {
-  apiKey: string;
-  signal?: AbortSignal;
-  [key: string]: unknown;
-}
-
-export function streamPercentDirect(
-  model: Model<any>,
-  context: Context,
-  options: StreamPercentDirectOptions,
-): AssistantMessageEventStream {
-  if (!options.apiKey) {
-    throw new Error("streamPercentDirect requires apiKey (BYOK mode)");
-  }
-  return piStream(model, context, options as Parameters<typeof piStream>[2]);
 }
 
 export function createUserMessage(text: string, images: ImageContent[] = []): Message {

@@ -16,11 +16,15 @@ export interface ByokConfig {
 }
 
 const DEFAULT_CONFIG: ByokConfig = {
-  enabled: false,
-  provider: "kimi",
-  modelId: "kimi-k2.6",
-  modelName: "Kimi K2.6",
-  baseUrl: "https://api.moonshot.cn/v1",
+  // BYOK is the default mode: the client must always hold a provider key
+  // and call the provider directly. `enabled` stays here for backwards
+  // compatibility with the toggle in SettingsView; treat it as the user
+  // explicitly confirming they want LLM features on.
+  enabled: true,
+  provider: "minimax",
+  modelId: "MiniMax-M3",
+  modelName: "MiniMax M3",
+  baseUrl: "https://api.minimaxi.com/v1",
 };
 
 export function loadByokConfig(): ByokConfig {
@@ -29,9 +33,16 @@ export function loadByokConfig(): ByokConfig {
   if (!raw) return DEFAULT_CONFIG;
   try {
     const parsed = JSON.parse(raw) as Partial<ByokConfig>;
+    // Defaults are the FALLBACK: a missing or explicit `false` `enabled`
+    // must be honored. We spread parsed first so its keys win.
     return {
       ...DEFAULT_CONFIG,
       ...parsed,
+      // but the `enabled` flag is also subject to spread: if the user
+      // wrote `enabled: false` we want to keep that. The `...parsed`
+      // already does that. The only case DEFAULT_CONFIG's `true` would
+      // override is when `enabled` is `undefined` in parsed, which is
+      // exactly when we want the default.
     };
   } catch {
     return DEFAULT_CONFIG;
@@ -48,12 +59,38 @@ export async function saveByokKey(key: string): Promise<void> {
 }
 
 export async function loadByokKey(): Promise<string | null> {
+  // Test fallback: when running in unit tests (no Tauri runtime), the
+  // Tauri `invoke` shim is unavailable. Tests poke
+  // `globalThis.__percent_test_byok_key` to stub the saved key.
+  const testKey = (globalThis as { __percent_test_byok_key?: unknown }).__percent_test_byok_key;
+  if (typeof testKey !== "undefined") {
+    return typeof testKey === "string" && testKey.length > 0 ? testKey : null;
+  }
   const value = await invoke<string | null>("get_byok_key");
   return value && value.length > 0 ? value : null;
 }
 
 export async function clearByokKey(): Promise<void> {
   await invoke("clear_byok_key");
+}
+
+/**
+ * Has the user finished BYOK setup?
+ *  - `enabled: true` in the persisted config, AND
+ *  - a non-empty API key on disk.
+ */
+export function isByokConfigured(): boolean {
+  const config = loadByokConfig();
+  return config.enabled;
+}
+
+/** Async variant: also checks the key file. Use this when you can
+ *  `await loadByokKey()` cheaply. */
+export async function isByokConfiguredAsync(): Promise<boolean> {
+  const config = loadByokConfig();
+  if (!config.enabled) return false;
+  const key = await loadByokKey();
+  return Boolean(key);
 }
 
 // 给 runtime 用的轻量校验：BYOK 启用 + key 在 → 完整配置

@@ -7,19 +7,13 @@ import { LogsView } from "@/views/LogsView";
 import { PeopleView } from "@/views/PeopleView";
 import { TasksView } from "@/views/TasksView";
 import { SettingsView } from "@/views/SettingsView";
-import { PermissionsView, PermissionsOnboarding } from "@/views/PermissionsView";
+import { PermissionsView } from "@/views/PermissionsView";
 import { LocalTestView } from "@/views/LocalTestView";
-import { AuthView } from "@/views/AuthView";
 import { WelcomeView } from "@/views/WelcomeView";
-import { LoadingView } from "@/views/LoadingView";
-import { AUTH_BASE } from "@/lib/types";
-import { authFetch, setAuthToken } from "@/lib/auth";
-import { clearCreditSnapshot, saveCreditSnapshot } from "@/lib/creditsGate";
 import {
   useLogs,
   usePeople,
   useTasks,
-  useCredits,
   useStats,
   useLogSearch,
   useCreateTask,
@@ -28,17 +22,10 @@ import {
   useDeletePerson,
   useInvalidateAll,
 } from "@/lib/queries";
-import type {
-  AuthUser,
-  PermissionStatus,
-  ShortcutConfig,
-} from "@/lib/types";
+import type { PermissionStatus, ShortcutConfig } from "@/lib/types";
 
 export default function MainWindow() {
   const [activeKey, setActiveKey] = useState<MenuKey>("home");
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [authError, setAuthError] = useState("");
   const [screenshotEnabled, setScreenshotEnabled] = useState(false);
   const [shortcutConfig, setShortcutConfig] = useState<ShortcutConfig>({
     key: "Enter",
@@ -50,7 +37,6 @@ export default function MainWindow() {
   const logsQuery = useLogs();
   const peopleQuery = usePeople();
   const tasksQuery = useTasks();
-  const creditsQuery = useCredits(authUser?.id);
   const statsQuery = useStats();
   const invalidateAll = useInvalidateAll();
   const triggerLogSearch = useLogSearch();
@@ -61,13 +47,24 @@ export default function MainWindow() {
   const deletePersonMut = useDeletePerson();
 
   // Onboarding
-  const [hasWelcomed, setHasWelcomed] = useState(false);
-  const [welcomedChecked, setWelcomedChecked] = useState(false);
-  const [onboardingPermissionsDone, setOnboardingPermissionsDone] = useState(false);
-  const [onboardingPermissions, setOnboardingPermissions] = useState<PermissionStatus[]>([]);
-  const [onboardingPermissionsLoading, setOnboardingPermissionsLoading] = useState(false);
-
-  const missingRequiredPermissions = permissions.some((p) => p.required && !p.granted);
+  // `hasWelcomed` is computed synchronously at component init from
+  // localStorage. We deliberately do NOT have a "Preparing…" loading
+  // state: the very first render already picks the right gate.
+  //
+  // Permission + BYOK setup is NO LONGER a startup gate. Both are
+  // reachable from the side nav (权限 page / SettingsView BYOK banner).
+  // We still check permission status in the background so the side nav
+  // can highlight 权限 when something's missing, but we never block the
+  // user from reaching the home view.
+  const [hasWelcomed] = useState<boolean>(() => {
+    if (typeof localStorage === "undefined") return false;
+    return localStorage.getItem("percent.welcomed") === "true";
+  });
+  // Tracks permission state. Loaded in the background by `loadPermissions`
+  // below; the side nav uses it to highlight 权限 when something's
+  // missing, but the user can use the app before this resolves.
+  // (No "onboarding step" — permission and BYOK setup live in the
+  // side nav, not as startup gates.)
 
   const loadPermissions = async (redirectIfMissing = false) => {
     try {
@@ -82,68 +79,15 @@ export default function MainWindow() {
   };
 
   useEffect(() => {
-    const welcomed = localStorage.getItem("percent.welcomed") === "true";
-    setHasWelcomed(welcomed);
-    setWelcomedChecked(true);
+    // (placeholder — `hasWelcomed` is now computed synchronously at init
+    // time. Permission state for the side-nav highlight is loaded by
+    // the existing `loadPermissions` call below.)
   }, []);
 
-  const loadOnboardingPermissions = async () => {
-    setOnboardingPermissionsLoading(true);
-    try {
-      const next = await invoke<PermissionStatus[]>("get_required_permissions");
-      setOnboardingPermissions(next);
-      if (next.length > 0 && next.every((p) => !p.required || p.granted)) {
-        setOnboardingPermissionsDone(true);
-      }
-    } catch (e) {
-      console.error("[main] onboarding get permissions error:", e);
-    } finally {
-      setOnboardingPermissionsLoading(false);
-    }
-  };
+  // We still load permissions in the background so the side nav can
+  // highlight 权限 when something's missing — but never block on it.
 
   useEffect(() => {
-    if (!welcomedChecked || !hasWelcomed) return;
-    void loadOnboardingPermissions();
-  }, [welcomedChecked, hasWelcomed]);
-
-  useEffect(() => {
-    let cancelled = false;
-    authFetch(`${AUTH_BASE}/get-session`)
-      .then(async (resp) => {
-        if (!resp.ok) {
-          const body = await resp.json().catch(() => null);
-          throw new Error(body?.message ?? "Session check failed");
-        }
-        return (await resp.json()) as { user?: AuthUser } | null;
-      })
-      .then((session) => {
-        if (!cancelled) setAuthUser(session?.user ?? null);
-      })
-      .catch((e) => {
-        console.error("[auth] session check failed:", e);
-        if (!cancelled) {
-          setAuthError(e instanceof Error ? e.message : "Session check failed");
-          setAuthUser(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setAuthLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // 事件监听：外部事件触发时 invalidate 相关 query
-  useEffect(() => {
-    if (!authUser?.id || typeof creditsQuery.data?.balance !== "number") return;
-    saveCreditSnapshot(authUser.id, creditsQuery.data.balance);
-  }, [authUser?.id, creditsQuery.data?.balance]);
-
-  useEffect(() => {
-    if (!authUser) return;
-
     void loadPermissions(true);
     invoke<boolean>("get_screenshot_enabled").then(setScreenshotEnabled);
     invoke<ShortcutConfig>("get_shortcut_config").then(setShortcutConfig);
@@ -162,31 +106,17 @@ export default function MainWindow() {
       unlistenAI.then((f) => f());
       unlistenTasks.then((f) => f());
     };
-  }, [authUser?.id]);
+  }, []);
 
-  useEffect(() => {
-    if (activeKey === "permissions" && permissions.length > 0 && !missingRequiredPermissions) {
-      setActiveKey("home");
-    }
-  }, [activeKey, permissions.length, missingRequiredPermissions]);
+  // (Removed: this effect used to auto-redirect from 权限 back to home
+// once `permissions` finished loading and everything was granted. That
+// made the page un-viewable: clicking 权限 would just bounce back to
+// home. 权限 is an informational page now, reachable on demand.)
 
-  const toggleScreenshot = async () => {
+const toggleScreenshot = async () => {
     const next = !screenshotEnabled;
     await invoke("set_screenshot_enabled", { enabled: next });
     setScreenshotEnabled(next);
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await authFetch(`${AUTH_BASE}/sign-out`, { method: "POST" });
-    } catch (e) {
-      console.error("[auth] sign out failed:", e);
-    } finally {
-      setAuthToken(null);
-      clearCreditSnapshot();
-      setAuthUser(null);
-      setActiveKey("home");
-    }
   };
 
   const handleDeletePerson = async (id: string): Promise<boolean> => {
@@ -199,52 +129,23 @@ export default function MainWindow() {
   };
 
   // Render gates
-  if (!welcomedChecked) {
-    return <LoadingView message="Preparing…" />;
-  }
   if (!hasWelcomed) {
     return <WelcomeView onContinue={() => {
       localStorage.setItem("percent.welcomed", "true");
-      setHasWelcomed(true);
+      // Re-render to advance to the next gate. We can't set state in
+      // this closure (no setter), so we force a reload — cheap and
+      // runs only on first launch.
+      window.location.reload();
     }} />;
-  }
-  if (!onboardingPermissionsDone) {
-    return (
-      <PermissionsOnboarding
-        permissions={onboardingPermissions}
-        loading={onboardingPermissionsLoading}
-        onRefresh={() => void loadOnboardingPermissions()}
-        onContinue={() => setOnboardingPermissionsDone(true)}
-      />
-    );
-  }
-  if (authLoading) {
-    return <LoadingView message="Checking session…" />;
-  }
-  if (!authUser) {
-    return (
-      <AuthView
-        initialError={authError}
-        onAuthenticated={(user) => {
-          setAuthUser(user);
-          setAuthError("");
-        }}
-      />
-    );
   }
 
   return (
     <AppShell
       activeKey={activeKey}
       onSelect={setActiveKey}
-      authUser={authUser}
-      credits={creditsQuery.data?.balance ?? null}
-      showPermissions={missingRequiredPermissions}
-      onSignOut={handleSignOut}
     >
       {activeKey === "home" && (
         <HomeView
-          user={authUser}
           stats={statsQuery.data ?? null}
           loading={statsQuery.isLoading}
         />
@@ -303,8 +204,6 @@ export default function MainWindow() {
           onShortcutSaved={setShortcutConfig}
           permissions={permissions}
           onRefreshPermissions={() => void loadPermissions(false)}
-          authUser={authUser}
-          onSignOut={handleSignOut}
           onCacheCleared={() => invalidateAll()}
         />
       )}

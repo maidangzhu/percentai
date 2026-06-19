@@ -9,22 +9,21 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./server": {
-      "types": "./dist/server.d.ts",
-      "import": "./dist/server.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "tsx --test --test-concurrency=1 test/*.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.75.4",
     "@earendil-works/pi-ai": "0.75.4",
+    "openai": "6.26.0",
     "typebox": "1.1.38"
   },
   "devDependencies": {
+    "tsx": "^4.22.3",
     "typescript": "^6.0.3"
   }
 }

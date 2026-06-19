@@ -1,5 +1,6 @@
 import {
   Type,
+  buildProviderModel,
   createPercentAgent,
   type Agent as RuntimeAgent,
   type AgentMessage as RuntimeAgentMessage,
@@ -7,8 +8,9 @@ import {
   type ImageContent,
   type Message as RuntimeMessage,
 } from "@percent/runtime";
-import { API_BASE, type TaskRow } from "@/lib/types";
-import { getAuthToken } from "@/lib/auth";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import type { TaskRow } from "@/lib/types";
+import { loadByokConfig, loadByokKey } from "@/lib/byokConfig";
 import { listPeople, getPerson } from "@/db/people";
 import { listLogs } from "@/db/logs";
 import { db } from "@/db/client";
@@ -111,8 +113,10 @@ export interface ToolsOptions {
   turnAllowed: { current: boolean };
 }
 
-// 所有 LLM 调用都走 server-proxy 模式（default）。server 端持 provider
-// key，client 永远不接触 api_key。
+// BYOK: build a model from the user's persisted BYOK config and pass the
+// provider key directly. The runtime's `createPercentAgent` will route
+// through `streamPercentDirect` → `streamMiniMax` (for M3) or pi-ai's own
+// `stream()` (for everything else). No server, no auth token, no credits.
 export async function createAgentForRequest(
   options: {
     sessionId: string;
@@ -120,22 +124,45 @@ export async function createAgentForRequest(
     toolsOptions: ToolsOptions;
   },
 ): Promise<RuntimeAgent> {
+  const config = loadByokConfig();
+  const apiKey = await loadByokKey();
+  if (!apiKey) {
+    throw new Error("createAgentForRequest requires a saved BYOK API key");
+  }
+  const model = buildProviderModel({
+    provider: config.provider,
+    modelId: config.modelId,
+    modelName: config.modelName,
+    baseUrl: config.baseUrl,
+  });
   return createPercentAgent({
-    apiBase: API_BASE,
-    authToken: getAuthToken() ?? undefined,
+    byokApiKey: apiKey,
+    model,
     sessionId: options.sessionId,
     systemPrompt: SCREEN_AGENT_SYSTEM_PROMPT,
     tools: createPercentTools(options.toolsOptions),
     messages: options.history,
+    // Bypass WebView CORS by routing through tauri-plugin-http's
+    // Rust-backed fetch. Required for providers like api.anthropic.com
+    // that reject the tauri://localhost origin.
+    fetch: tauriFetch as unknown as typeof globalThis.fetch,
   });
 }
 
 export function createAgentPrompt(text: string, screen: {
-  app_name: string;
-  occurred_at: string;
+  app_name?: string;
+  occurred_at?: string;
   image_base64?: string;
 }): RuntimeMessage {
-  const promptText = `当前前台应用：${screen.app_name}\n时间：${screen.occurred_at}\n用户问题：${text.trim()}`;
+  // First query of a session carries a fresh screen context (app,
+  // timestamp, screenshot). Follow-up queries in the same session
+  // omit everything except the user's text — the model can refer back
+  // to the first query's screenshot through the chat history.
+  const lines: string[] = [];
+  if (screen.app_name) lines.push(`当前前台应用：${screen.app_name}`);
+  if (screen.occurred_at) lines.push(`时间：${screen.occurred_at}`);
+  lines.push(`用户问题：${text.trim()}`);
+  const promptText = lines.join("\n");
   const images: ImageContent[] = screen.image_base64
     ? [{ type: "image", data: screen.image_base64, mimeType: "image/png" }]
     : [];

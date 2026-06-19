@@ -1,5 +1,3 @@
-use chrono::Local;
-use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, RwLock};
@@ -18,7 +16,7 @@ mod window;
 use keyboard::{start_keyboard_listener, ShortcutConfig};
 use logger::LogStore;
 use permissions::{get_required_permissions, open_permission_settings, request_permission};
-use screenshotter::capture_screen_without_bubble;
+use screenshotter::{capture_context_metadata, spawn_capture_pipeline};
 use window::{set_bubble_hit_regions, setup_windows, BubbleHitRegions};
 
 pub struct AppState {
@@ -176,37 +174,18 @@ fn clear_local_cache(state: tauri::State<AppState>) -> Result<usize, String> {
     Ok(removed)
 }
 
-#[derive(Clone, Serialize)]
-struct CaptureContext {
-    occurred_at: String,
-    app_name: String,
-    app_bundle_id: String,
-    is_send: bool,
-    is_wechat: bool,
-    screenshot_path: Option<String>,
-}
-
 #[tauri::command]
 fn capture_current_context(
     app: tauri::AppHandle<Wry>,
     state: tauri::State<AppState>,
-) -> CaptureContext {
-    let front = frontapp::get_frontmost_app();
-    let is_send = frontapp::is_send_action(&front);
-    let is_wechat = front.bundle_id == "com.tencent.xinWeChat"
-        || front.name.to_lowercase().contains("wechat")
-        || front.name.contains("微信");
-    let screenshot_path = capture_screen_without_bubble(&app, &state.log_dir)
-        .map(|path| path.to_string_lossy().to_string());
-
-    CaptureContext {
-        occurred_at: Local::now().format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string(),
-        app_name: front.name,
-        app_bundle_id: front.bundle_id,
-        is_send,
-        is_wechat,
-        screenshot_path,
-    }
+) -> screenshotter::CaptureContext {
+    // Fast (~30ms) metadata fetch — just osascript for frontmost app
+    // info + uuid generation. The actual screenshot + resize + encode
+    // happens on a background thread spawned below, and the result
+    // arrives via the `capture-ready` event.
+    let ctx = capture_context_metadata(&app);
+    spawn_capture_pipeline(app, ctx.capture_id.clone(), state.log_dir.clone());
+    ctx
 }
 
 #[tauri::command]
@@ -227,36 +206,6 @@ fn read_file_base64(path: String) -> Result<String, String> {
     let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-    Ok(base64_encode(&buf))
-}
-
-/// 读取本地图片，按最大边 resize 后以 JPEG q=80 编码再 base64。
-/// 减少上传给 vision LLM 的 token 数 —— 实测把 2880x1800 PNG（~2.2MB）
-/// 砍到 1280px JPEG（~180KB），analyze 延迟从 ~14s 降到 ~8s。
-#[tauri::command]
-fn read_file_base64_resized(path: String, max_dim: u32) -> Result<String, String> {
-    use image::codecs::jpeg::JpegEncoder;
-    use image::{ExtendedColorType, ImageReader};
-    let img = ImageReader::open(&path)
-        .map_err(|e| format!("open: {e}"))?
-        .decode()
-        .map_err(|e| format!("decode: {e}"))?;
-    let (w, h) = (img.width(), img.height());
-    let resized = if w.max(h) > max_dim {
-        img.resize(max_dim, max_dim, image::imageops::FilterType::Lanczos3)
-    } else {
-        img
-    };
-    // JPEG 不带 alpha，强制 to_rgb8
-    let rgb = resized.to_rgb8();
-    let (rw, rh) = (rgb.width(), rgb.height());
-    let mut buf = Vec::new();
-    {
-        let mut encoder = JpegEncoder::new_with_quality(&mut buf, 80);
-        encoder
-            .encode(rgb.as_raw(), rw, rh, ExtendedColorType::Rgb8)
-            .map_err(|e| format!("encode: {e}"))?;
-    }
     Ok(base64_encode(&buf))
 }
 
@@ -469,49 +418,27 @@ fn capture_frontmost_app() -> Result<ax_capture::FrontmostApp, String> {
     ax_capture::frontmost_app().ok_or_else(|| "no frontmost app".to_string())
 }
 
-// 给 main window "local 测试" 调试用：纯截屏（不需要 a11y 权限），返回路径 + 尺寸 + 体积。
-// 跟现有 bubble 截屏共用同一条 screencapture 路径，省得另写一份。
+// 给 main window "local 测试" 调试用：拿一份 capture_id + 同步派发
+// capture 任务。测试 UI 自己 listen("capture-ready") 拿图，stat 路径。
 #[derive(serde::Serialize)]
 struct ScreenshotTestResult {
-    path: String,
-    size_bytes: u64,
-    width: u32,
-    height: u32,
-    duration_ms: u64,
+    capture_id: String,
+    occurred_at: String,
+    app_name: String,
 }
 
 #[tauri::command]
 fn test_capture_screenshot(
     app: tauri::AppHandle<Wry>,
     state: tauri::State<AppState>,
-) -> Result<ScreenshotTestResult, String> {
-    use std::time::Instant;
-    let t0 = Instant::now();
-    let path = screenshotter::capture_screen_without_bubble(&app, &state.log_dir)
-        .ok_or_else(|| "screencapture failed".to_string())?;
-    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-    let size_bytes = meta.len();
-    let (width, height) = read_png_dimensions(&path).unwrap_or((0, 0));
-    Ok(ScreenshotTestResult {
-        path: path.to_string_lossy().to_string(),
-        size_bytes,
-        width,
-        height,
-        duration_ms: t0.elapsed().as_millis() as u64,
-    })
-}
-
-fn read_png_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
-    use std::io::Read;
-    let mut f = std::fs::File::open(path).ok()?;
-    let mut header = [0u8; 24];
-    f.read_exact(&mut header).ok()?;
-    if &header[12..16] != b"IHDR" {
-        return None;
+) -> ScreenshotTestResult {
+    let ctx = capture_context_metadata(&app);
+    spawn_capture_pipeline(app, ctx.capture_id.clone(), state.log_dir.clone());
+    ScreenshotTestResult {
+        capture_id: ctx.capture_id,
+        occurred_at: ctx.occurred_at,
+        app_name: ctx.app_name,
     }
-    let w = u32::from_be_bytes([header[16], header[17], header[18], header[19]]);
-    let h = u32::from_be_bytes([header[20], header[21], header[22], header[23]]);
-    Some((w, h))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -526,6 +453,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_http::init())
         .manage(AppState::default())
         .manage(BubbleHitRegions::default())
         .invoke_handler(tauri::generate_handler![
@@ -549,7 +477,6 @@ pub fn run() {
             open_permission_settings,
             request_permission,
             read_file_base64,
-            read_file_base64_resized,
             add_task_to_calendar,
             append_bubble_log,
             save_byok_key,

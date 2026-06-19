@@ -5,28 +5,35 @@ import {
   Calendar as CalendarIcon,
   Keyboard,
   Trash2,
-  LogOut,
   CheckCircle2,
   AlertCircle,
-  User2,
   Timer,
   ClipboardCopy,
   KeyRound,
   Eye,
   EyeOff,
-  Plug,
 } from "lucide-react";
 import { db } from "@/db/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { isCalendarAutoAddEnabled } from "@/lib/calendar";
-import type { AuthUser, PermissionStatus, ShortcutConfig } from "@/lib/types";
+import type { PermissionStatus, ShortcutConfig } from "@/lib/types";
 import { PROVIDER_PRESETS, type ProviderId } from "@percent/runtime";
 import {
   clearByokKey,
+  isByokConfiguredAsync,
   loadByokConfig,
   loadByokKey,
   saveByokConfig,
@@ -51,12 +58,15 @@ interface SettingsViewProps {
   onShortcutSaved: (shortcut: ShortcutConfig) => void;
   permissions: PermissionStatus[];
   onRefreshPermissions: () => void;
-  authUser: AuthUser;
-  onSignOut: () => void;
   onCacheCleared: () => void;
 }
 
 export function SettingsView(props: SettingsViewProps) {
+  const [byokReady, setByokReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    void isByokConfiguredAsync().then(setByokReady);
+  }, []);
+
   return (
     <div className="flex h-full flex-col">
       <PageHeader
@@ -64,9 +74,9 @@ export function SettingsView(props: SettingsViewProps) {
         title="设置"
         description="截屏、日历、快捷键和本地数据。"
       />
+      {byokReady === false && <ByokRequiredBanner />}
       <div className="flex-1 overflow-y-auto scroll-thin">
         <div className="mx-auto w-full max-w-2xl divide-y divide-border/40 stagger">
-          <AccountSection authUser={props.authUser} onSignOut={props.onSignOut} />
           <ByokSection />
           <CaptureSection
             screenshotEnabled={props.screenshotEnabled}
@@ -86,22 +96,13 @@ export function SettingsView(props: SettingsViewProps) {
   );
 }
 
-function AccountSection({ authUser, onSignOut }: { authUser: AuthUser; onSignOut: () => void }) {
+function ByokRequiredBanner() {
   return (
-    <SettingRow
-      index="01"
-      icon={<User2 className="h-[14px] w-[14px]" strokeWidth={1.75} />}
-      title="账号"
-      description="用邮箱登录。账号信息存 Neon，业务数据全在这台 Mac 上。"
-    >
-      <div className="flex items-center gap-2.5">
-        <span className="font-mono text-[12px] tabular-nums text-muted-foreground">{authUser.email}</span>
-        <Button variant="outline" size="sm" onClick={onSignOut} className="h-7">
-          <LogOut className="h-3 w-3" strokeWidth={1.75} />
-          退出登录
-        </Button>
-      </div>
-    </SettingRow>
+    <div className="border-b border-amber-500/40 bg-amber-500/10 px-6 py-3 text-[12.5px] text-amber-900 dark:text-amber-200">
+      <span className="font-medium">未配置 BYOK。</span>{" "}
+      客户端无法直连 LLM —— 下面填一个 provider 和 key，截屏/回复/任务检测才会工作。
+      （已加的 provider 走 {`https://`} 协议，baseUrl 会自动加 https://）
+    </div>
   );
 }
 
@@ -131,7 +132,7 @@ function CalendarSection() {
   }, []);
   return (
     <SettingRow
-      index="04"
+      index="05"
       icon={<CalendarIcon className="h-[14px] w-[14px]" strokeWidth={1.75} />}
       title="日历"
       description="开启后，有截止时间的任务会加到 macOS 日历（1 小时块）。首次会弹 macOS 授权。"
@@ -191,7 +192,7 @@ function TaskCaptureSection() {
   }, []);
   return (
     <SettingRow
-      index="03"
+      index="04"
       icon={<Timer className="h-[14px] w-[14px]" strokeWidth={1.75} />}
       title="任务捕捉"
       description="气泡弹出待办候选时，6.5s 倒计时结束后自动确认。关掉则每次都需手动 Confirm 或 Ignore。"
@@ -239,7 +240,7 @@ function ShortcutSection({
 
   return (
     <SettingRow
-      index="04"
+      index="06"
       icon={<Keyboard className="h-[14px] w-[14px]" strokeWidth={1.75} />}
       title="截屏快捷键"
       description="触发截屏 + 分析流程。"
@@ -334,7 +335,7 @@ function ClearCacheSection({ onCacheCleared }: { onCacheCleared: () => void }) {
 
   return (
     <SettingRow
-      index="05"
+      index="07"
       icon={<Trash2 className="h-[14px] w-[14px]" strokeWidth={1.75} />}
       title="清空本地数据"
       description="删除缓存的截图、本地的按 Enter/AI 日志、以及 server 端所有日志、联系人、聊天、任务。"
@@ -464,124 +465,163 @@ function ByokSection() {
     setMessage({ kind: "ok", text: next ? "BYOK on" : "BYOK off" });
   };
 
+  void onToggleEnabled; // kept for reference; UI no longer exposes the toggle.
+
   return (
     <SettingRow
-      index="02"
+      index="01"
       icon={<KeyRound className="h-[14px] w-[14px]" strokeWidth={1.75} />}
       title="BYOK (Bring Your Own Key)"
-      description="Use your own LLM API key for the Ask-the-screen agent. Traffic goes directly to the provider — no server proxy, no credit deduction. You pay the provider."
+      description="用你自己的 LLM API key，客户端直连 provider，不经 Percent 服务器。"
     >
-      <div className="flex w-[420px] flex-col items-stretch gap-3">
-        <div className="flex items-center justify-between">
-          <span className="text-[12px] text-muted-foreground">
-            {draft.enabled ? "开启" : "关闭"}
-            {draft.enabled && hasKey ? " · key 已保存" : draft.enabled ? " · 缺少 key" : ""}
-          </span>
-          <Switch
-            checked={draft.enabled}
-            onCheckedChange={onToggleEnabled}
-            disabled={!hasKey && !draft.enabled}
-          />
-        </div>
-
-        <div>
-          <label className="text-[11px] font-medium text-muted-foreground">服务方</label>
-          <select
-            className="input mt-1 w-full"
-            value={draft.provider}
-            onChange={(e) => onProviderChange(e.target.value as ProviderId)}
-          >
-            {Object.values(PROVIDER_PRESETS).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="text-[11px] font-medium text-muted-foreground">模型</label>
-          {preset.suggestedModels && preset.suggestedModels.length > 0 ? (
-            <select
-              className="input mt-1 w-full"
-              value={draft.modelId}
-              onChange={(e) => {
-                const found = preset.suggestedModels?.find((m) => m.id === e.target.value);
-                setDraft({
-                  ...draft,
-                  modelId: e.target.value,
-                  modelName: found?.name ?? e.target.value,
-                });
-              }}
-            >
-              {preset.suggestedModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              className="input mt-1 w-full"
-              value={draft.modelId}
-              onChange={(e) => setDraft({ ...draft, modelId: e.target.value })}
-              placeholder={preset.defaultModelId}
-            />
-          )}
-        </div>
-
-        <div>
-          <label className="text-[11px] font-medium text-muted-foreground">API 地址</label>
-          <input
-            className="input mt-1 w-full font-mono text-[11.5px]"
-            value={draft.baseUrl}
-            onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
-            placeholder="https://api.example.com/v1"
-          />
-        </div>
-
-        <div>
-          <label className="text-[11px] font-medium text-muted-foreground">
-            API key {hasKey && <span className="text-emerald-700">· 已保存</span>}
-          </label>
-          <div className="relative mt-1">
-            <input
-              className="input w-full pr-9 font-mono text-[11.5px]"
-              type={showKey ? "text" : "password"}
-              value={apiKeyDraft}
-              onChange={(e) => setApiKeyDraft(e.target.value)}
-              placeholder={hasKey ? "•••••• (已保存；输入即替换)" : "sk-..."}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
-              onClick={() => setShowKey((s) => !s)}
-              tabIndex={-1}
-            >
-              {showKey ? (
-                <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />
-              ) : (
-                <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />
+      <div className="w-[460px]">
+        {/* Status row */}
+        <div className="mb-4 flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5">
+          <div className="flex items-center gap-2.5">
+            <span
+              className={cn(
+                "inline-flex h-2 w-2 rounded-full",
+                hasKey ? "bg-emerald-500" : "bg-amber-500",
               )}
-            </button>
+            />
+            <span className="text-[12.5px] text-foreground">
+              {hasKey ? "已配置 key" : "未配置 key"}
+            </span>
+            {draft.enabled && (
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-medium text-emerald-700 dark:text-emerald-300">
+                启用
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        <div className="space-y-3.5">
+          {/* Provider */}
+          <div className="space-y-1.5">
+            <Label htmlFor="byok-provider" className="text-[11.5px] text-muted-foreground">
+              服务方
+            </Label>
+            <Select
+              value={draft.provider}
+              onValueChange={(v) => onProviderChange(v as ProviderId)}
+            >
+              <SelectTrigger id="byok-provider" className="h-9 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.values(PROVIDER_PRESETS).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Model */}
+          <div className="space-y-1.5">
+            <Label htmlFor="byok-model" className="text-[11.5px] text-muted-foreground">
+              模型
+            </Label>
+            {preset.suggestedModels && preset.suggestedModels.length > 0 ? (
+              <Select
+                value={draft.modelId}
+                onValueChange={(v) => {
+                  const found = preset.suggestedModels?.find((m) => m.id === v);
+                  setDraft({
+                    ...draft,
+                    modelId: v,
+                    modelName: found?.name ?? v,
+                  });
+                }}
+              >
+                <SelectTrigger id="byok-model" className="h-9 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {preset.suggestedModels.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="byok-model"
+                className="h-9"
+                value={draft.modelId}
+                onChange={(e) => setDraft({ ...draft, modelId: e.target.value })}
+                placeholder={preset.defaultModelId}
+              />
+            )}
+          </div>
+
+          {/* Base URL */}
+          <div className="space-y-1.5">
+            <Label htmlFor="byok-url" className="text-[11.5px] text-muted-foreground">
+              API 地址
+            </Label>
+            <Input
+              id="byok-url"
+              className="h-9 font-mono text-[12px]"
+              value={draft.baseUrl}
+              onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+              placeholder="https://api.example.com/v1"
+            />
+          </div>
+
+          {/* API Key */}
+          <div className="space-y-1.5">
+            <Label htmlFor="byok-key" className="text-[11.5px] text-muted-foreground">
+              API key
+              {hasKey && (
+                <span className="ml-2 text-emerald-700 dark:text-emerald-300">· 已保存</span>
+              )}
+            </Label>
+            <div className="relative">
+              <Input
+                id="byok-key"
+                className="h-9 pr-9 font-mono text-[12px]"
+                type={showKey ? "text" : "password"}
+                value={apiKeyDraft}
+                onChange={(e) => setApiKeyDraft(e.target.value)}
+                placeholder={hasKey ? "•••••• (输入即替换)" : "sk-..."}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+                onClick={() => setShowKey((s) => !s)}
+                tabIndex={-1}
+              >
+                {showKey ? (
+                  <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} />
+                ) : (
+                  <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Action row */}
+        <div className="mt-4 flex items-center justify-between">
+          <div>
             {message && (
               <span
                 className={cn(
-                  "inline-flex items-center gap-1 text-[11px]",
-                  message.kind === "ok" ? "text-emerald-700" : "text-destructive"
+                  "inline-flex items-center gap-1.5 text-[12px]",
+                  message.kind === "ok"
+                    ? "text-emerald-700 dark:text-emerald-300"
+                    : "text-destructive",
                 )}
               >
                 {message.kind === "ok" ? (
-                  <CheckCircle2 className="h-3 w-3" strokeWidth={2} />
+                  <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2} />
                 ) : (
-                  <AlertCircle className="h-3 w-3" strokeWidth={2} />
+                  <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
                 )}
                 {message.text}
               </span>
@@ -594,19 +634,11 @@ function ByokSection() {
                 variant="outline"
                 onClick={onClearKey}
                 disabled={saving}
-                className="h-7 px-3 text-[12px]"
               >
                 清除 key
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onSave}
-              disabled={saving}
-              className="h-7 px-3 text-[12px]"
-            >
-              <Plug className="mr-1 h-3 w-3" strokeWidth={1.75} />
+            <Button size="sm" onClick={onSave} disabled={saving}>
               {saving ? "保存中…" : "保存"}
             </Button>
           </div>

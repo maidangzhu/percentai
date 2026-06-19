@@ -1,10 +1,3 @@
-// 抓前台 app 元信息（PID + name + bundle_id），不抓 a11y 树。
-//
-// 为啥不抓 a11y 树：macOS AX bridge 通信在 WKWebView / 自绘 app 上经常卡，
-// 跟被检 app 的 AX 通信失败（kAXErrorCannotComplete -25204）无法避免。
-// screenpipe 自己也不抓整棵树（用 click 位置 + observer 增量）。
-// percent 走截屏 + 视觉模型拿聊天内容；a11y 树这条路径砍掉。
-
 use serde::Serialize;
 
 #[derive(Serialize, Clone)]

@@ -1,12 +1,12 @@
 import { forwardRef } from "react";
-import { Sparkles, MessageSquareQuote, ListTodo, ExternalLink, Loader2 } from "lucide-react";
+import { Sparkles, MessageSquareQuote, ExternalLink, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type ActionKey = "agent" | "reply" | "task" | "main";
+export type ActionKey = "agent" | "reply" | "main";
 
 interface ActionMenuProps {
   onAction: (key: ActionKey) => void;
-  busy: "agent" | "reply" | "task" | null;
+  busy: "agent" | "reply" | null;
   aiDisabled?: boolean;
 }
 
@@ -44,13 +44,6 @@ export const ActionMenu = forwardRef<HTMLDivElement, ActionMenuProps>(function A
           title="帮我回"
           onClick={() => onAction("reply")}
           loading={busy === "reply"}
-          disabled={aiDisabled}
-        />
-        <ActionItem
-          icon={<ListTodo className="h-[13px] w-[13px]" strokeWidth={1.75} />}
-          title="记任务"
-          onClick={() => onAction("task")}
-          loading={busy === "task"}
           disabled={aiDisabled}
         />
       </ul>
