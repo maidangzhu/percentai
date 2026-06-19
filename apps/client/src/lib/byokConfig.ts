@@ -27,23 +27,39 @@ const DEFAULT_CONFIG: ByokConfig = {
   baseUrl: "https://api.minimaxi.com/v1",
 };
 
+const SUPPORTED_CONFIGS: Record<"openai" | "minimax", Omit<ByokConfig, "enabled">> = {
+  openai: {
+    provider: "openai",
+    modelId: "gpt-5.5",
+    modelName: "GPT-5.5",
+    baseUrl: "https://api.openai.com/v1",
+  },
+  minimax: {
+    provider: "minimax",
+    modelId: "MiniMax-M3",
+    modelName: "MiniMax M3",
+    baseUrl: "https://api.minimaxi.com/v1",
+  },
+};
+
+function normalizeByokConfig(config: Partial<ByokConfig>): ByokConfig {
+  const provider =
+    config.provider === "openai" || config.provider === "minimax" ? config.provider : "minimax";
+  const supported = SUPPORTED_CONFIGS[provider];
+  return {
+    enabled: config.enabled ?? DEFAULT_CONFIG.enabled,
+    ...supported,
+    baseUrl: config.provider === provider && config.baseUrl ? config.baseUrl : supported.baseUrl,
+  };
+}
+
 export function loadByokConfig(): ByokConfig {
   if (typeof localStorage === "undefined") return DEFAULT_CONFIG;
   const raw = localStorage.getItem(CONFIG_KEY);
   if (!raw) return DEFAULT_CONFIG;
   try {
     const parsed = JSON.parse(raw) as Partial<ByokConfig>;
-    // Defaults are the FALLBACK: a missing or explicit `false` `enabled`
-    // must be honored. We spread parsed first so its keys win.
-    return {
-      ...DEFAULT_CONFIG,
-      ...parsed,
-      // but the `enabled` flag is also subject to spread: if the user
-      // wrote `enabled: false` we want to keep that. The `...parsed`
-      // already does that. The only case DEFAULT_CONFIG's `true` would
-      // override is when `enabled` is `undefined` in parsed, which is
-      // exactly when we want the default.
-    };
+    return normalizeByokConfig(parsed);
   } catch {
     return DEFAULT_CONFIG;
   }

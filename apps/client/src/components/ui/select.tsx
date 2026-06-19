@@ -7,6 +7,7 @@ interface SelectContextValue {
   onValueChange: (value: string) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
+  disabled: boolean;
   triggerRef: React.RefObject<HTMLElement | null>;
   contentRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -26,7 +27,7 @@ interface SelectProps {
   disabled?: boolean;
 }
 
-export function Select({ value, onValueChange, children, disabled: _disabled }: SelectProps) {
+export function Select({ value, onValueChange, children, disabled = false }: SelectProps) {
   const [open, setOpen] = React.useState(false);
   const triggerRef = React.useRef<HTMLElement | null>(null);
   const contentRef = React.useRef<HTMLDivElement | null>(null);
@@ -53,7 +54,7 @@ export function Select({ value, onValueChange, children, disabled: _disabled }: 
 
   return (
     <SelectContext.Provider
-      value={{ value, onValueChange, open, setOpen, triggerRef, contentRef }}
+      value={{ value, onValueChange, open, setOpen, disabled, triggerRef, contentRef }}
     >
       <div className="relative">{children}</div>
     </SelectContext.Provider>
@@ -67,6 +68,7 @@ interface SelectTriggerProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 export const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerProps>(
   function SelectTrigger({ className, children, disabled, ...props }, _ref) {
     const ctx = useSelectContext();
+    const isDisabled = disabled || ctx.disabled;
     const localRef = React.useRef<HTMLButtonElement | null>(null);
     // Bridge local + parent ref
     const setRefs = React.useCallback(
@@ -80,8 +82,8 @@ export const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerPr
       <button
         ref={setRefs}
         type="button"
-        disabled={disabled}
-        onClick={() => !disabled && ctx.setOpen(!ctx.open)}
+        disabled={isDisabled}
+        onClick={() => !isDisabled && ctx.setOpen(!ctx.open)}
         className={cn(
           "flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-[13px] shadow-sm transition-colors",
           "placeholder:text-muted-foreground",
@@ -113,7 +115,7 @@ interface SelectContentProps {
 
 export function SelectContent({ children, className }: SelectContentProps) {
   const ctx = useSelectContext();
-  if (!ctx.open) return null;
+  if (!ctx.open || ctx.disabled) return null;
   return (
     <div
       ref={ctx.contentRef as React.RefObject<HTMLDivElement>}
@@ -139,7 +141,8 @@ export function SelectItem({ value, children, className }: SelectItemProps) {
   const ctx = useSelectContext();
   const isSelected = ctx.value === value;
   return (
-    <div
+    <button
+      type="button"
       role="option"
       aria-selected={isSelected}
       onClick={() => {
@@ -147,8 +150,9 @@ export function SelectItem({ value, children, className }: SelectItemProps) {
         ctx.setOpen(false);
       }}
       className={cn(
-        "relative flex h-8 cursor-pointer items-center rounded-sm px-2 pl-8 text-[13px] outline-none select-none",
+        "relative flex h-8 w-full cursor-pointer items-center rounded-sm px-2 pl-8 text-left text-[13px] outline-none select-none",
         "hover:bg-accent hover:text-accent-foreground",
+        "focus:bg-accent focus:text-accent-foreground",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         isSelected && "font-medium",
         className,
@@ -160,18 +164,15 @@ export function SelectItem({ value, children, className }: SelectItemProps) {
         </span>
       )}
       <span className="truncate">{children}</span>
-    </div>
+    </button>
   );
 }
 
 interface SelectValueProps {
   placeholder?: string;
+  children?: React.ReactNode;
 }
 
-export function SelectValue({ placeholder }: SelectValueProps) {
-  // The trigger renders its children directly (so it can format the
-  // selected label however it wants). This helper is a no-op here but
-  // kept for API parity with Radix/shadcn.
-  void placeholder;
-  return null;
+export function SelectValue({ placeholder, children }: SelectValueProps) {
+  return <>{children ?? placeholder ?? null}</>;
 }

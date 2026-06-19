@@ -1,7 +1,7 @@
-import { ScrollText, Users, ListTodo, Settings, ShieldAlert, Home as HomeIcon, FlaskConical, type LucideIcon } from "lucide-react";
+import { ScrollText, Users, ListTodo, Settings, ShieldAlert, Home as HomeIcon, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type MenuKey = "home" | "permissions" | "logs" | "people" | "tasks" | "settings" | "local_test";
+export type MenuKey = "home" | "permissions" | "logs" | "people" | "tasks" | "settings";
 
 interface MenuItem {
   key: MenuKey;
@@ -18,7 +18,6 @@ const BASE_MENU: MenuItem[] = [
   { key: "tasks", label: "任务", icon: ListTodo, section: "workspace" },
   { key: "permissions", label: "权限", icon: ShieldAlert, section: "workspace" },
   { key: "settings", label: "设置", icon: Settings, section: "workspace" },
-  { key: "local_test", label: "local 测试", icon: FlaskConical, section: "dev" },
 ];
 
 interface AppShellProps {

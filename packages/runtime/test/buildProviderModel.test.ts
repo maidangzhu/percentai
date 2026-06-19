@@ -29,13 +29,13 @@ test("buildProviderModel for minimax returns MiniMax-M3 by default", () => {
   assert.deepEqual(model.input, ["text", "image"]);
 });
 
-test("buildProviderModel for minimax preserves explicit modelId override", () => {
+test("buildProviderModel for minimax ignores explicit modelId override", () => {
   const model = buildProviderModel({
     provider: "minimax",
     modelId: "MiniMax-Text-01",
     baseUrl: "https://api.minimaxi.com/v1",
   });
-  assert.equal(model.id, "MiniMax-Text-01");
+  assert.equal(model.id, "MiniMax-M3");
 });
 
 test("buildProviderModel for minimax throws when baseUrl is empty", () => {

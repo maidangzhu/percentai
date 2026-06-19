@@ -66,19 +66,13 @@ export const PROVIDER_PRESETS: Record<ProviderId, ProviderPreset> = {
     label: "OpenAI",
     api: "openai-completions",
     baseUrl: "https://api.openai.com/v1",
-    defaultModelId: "gpt-4o",
-    defaultModelName: "GPT-4o",
+    defaultModelId: "gpt-5.5",
+    defaultModelName: "GPT-5.5",
     multimodal: true,
     reasoning: false,
     contextWindow: 128000,
     maxTokens: 16384,
-    suggestedModels: [
-      { id: "gpt-4o", name: "GPT-4o" },
-      { id: "gpt-4o-mini", name: "GPT-4o mini" },
-      { id: "gpt-4.1", name: "GPT-4.1" },
-      { id: "gpt-4.1-mini", name: "GPT-4.1 mini" },
-      { id: "o4-mini", name: "o4-mini" },
-    ],
+    suggestedModels: [{ id: "gpt-5.5", name: "GPT-5.5" }],
   },
   deepseek: {
     id: "deepseek",
@@ -114,16 +108,10 @@ export const PROVIDER_PRESETS: Record<ProviderId, ProviderPreset> = {
     // pi-ai's openai-completions parser doesn't understand M3's
     // `reasoning_details[]` array, so we route MiniMax-M3 through a custom
     // `streamMiniMax` in index.ts instead of using pi-ai's built-in flow.
-    // The `requiresThinkingAsText: false` here only matters if a user
-    // picks a non-M3 MiniMax model (Text-01 / VL-01).
     compat: {
       requiresThinkingAsText: false,
     },
-    suggestedModels: [
-      { id: "MiniMax-M3", name: "MiniMax M3 (multimodal, recommended)" },
-      { id: "MiniMax-Text-01", name: "MiniMax Text 01" },
-      { id: "MiniMax-VL-01", name: "MiniMax VL 01" },
-    ],
+    suggestedModels: [{ id: "MiniMax-M3", name: "MiniMax M3" }],
   },
   anthropic: {
     id: "anthropic",
@@ -169,8 +157,14 @@ export interface BuildModelInput {
 
 export function buildProviderModel(input: BuildModelInput): Model<any> {
   const preset = PROVIDER_PRESETS[input.provider];
-  const id = input.modelId?.trim() || preset.defaultModelId;
-  const name = input.modelName?.trim() || preset.defaultModelName;
+  const id =
+    preset.id === "minimax"
+      ? preset.defaultModelId
+      : input.modelId?.trim() || preset.defaultModelId;
+  const name =
+    preset.id === "minimax"
+      ? preset.defaultModelName
+      : input.modelName?.trim() || preset.defaultModelName;
   const baseUrl = input.baseUrl?.trim() || preset.baseUrl;
   if (!baseUrl) {
     throw new Error(

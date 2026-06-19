@@ -41,6 +41,26 @@ import {
   type ByokConfig,
 } from "@/lib/byokConfig";
 
+const BYOK_PROVIDER_IDS = ["openai", "minimax"] as const satisfies readonly ProviderId[];
+type ByokProviderId = (typeof BYOK_PROVIDER_IDS)[number];
+
+const BYOK_PROVIDER_OPTIONS = BYOK_PROVIDER_IDS.map((id) => PROVIDER_PRESETS[id]);
+
+function normalizeByokConfig(config: ByokConfig): ByokConfig {
+  const provider: ByokProviderId = BYOK_PROVIDER_IDS.includes(config.provider as ByokProviderId)
+    ? (config.provider as ByokProviderId)
+    : "minimax";
+  const preset = PROVIDER_PRESETS[provider];
+  const model = preset.suggestedModels?.[0];
+  return {
+    ...config,
+    provider,
+    modelId: model?.id ?? preset.defaultModelId,
+    modelName: model?.name ?? preset.defaultModelName,
+    baseUrl: config.provider === provider && config.baseUrl ? config.baseUrl : preset.baseUrl,
+  };
+}
+
 const SHORTCUT_OPTIONS: { label: string; value: ShortcutConfig }[] = [
   { label: "Enter", value: { key: "Enter", modifiers: [] } },
   { label: "⌘ + Enter", value: { key: "Enter", modifiers: ["Command"] } },
@@ -386,7 +406,7 @@ function ClearCacheSection({ onCacheCleared }: { onCacheCleared: () => void }) {
 }
 
 function ByokSection() {
-  const [draft, setDraft] = useState<ByokConfig>(() => loadByokConfig());
+  const [draft, setDraft] = useState<ByokConfig>(() => normalizeByokConfig(loadByokConfig()));
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [hasKey, setHasKey] = useState(false);
@@ -408,14 +428,18 @@ function ByokSection() {
   }, []);
 
   const preset = PROVIDER_PRESETS[draft.provider];
+  const selectedProviderLabel = preset.label;
+  const selectedModelLabel =
+    preset.suggestedModels?.find((model) => model.id === draft.modelId)?.name ?? draft.modelName;
 
   const onProviderChange = (next: ProviderId) => {
     const p = PROVIDER_PRESETS[next];
+    const model = p.suggestedModels?.[0];
     setDraft({
       ...draft,
       provider: next,
-      modelId: p.defaultModelId,
-      modelName: p.defaultModelName,
+      modelId: model?.id ?? p.defaultModelId,
+      modelName: model?.name ?? p.defaultModelName,
       baseUrl: p.baseUrl || draft.baseUrl,
     });
   };
@@ -506,10 +530,10 @@ function ByokSection() {
               onValueChange={(v) => onProviderChange(v as ProviderId)}
             >
               <SelectTrigger id="byok-provider" className="h-9 w-full">
-                <SelectValue />
+                <SelectValue>{selectedProviderLabel}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {Object.values(PROVIDER_PRESETS).map((p) => (
+                {BYOK_PROVIDER_OPTIONS.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.label}
                   </SelectItem>
@@ -536,7 +560,7 @@ function ByokSection() {
                 }}
               >
                 <SelectTrigger id="byok-model" className="h-9 w-full">
-                  <SelectValue />
+                  <SelectValue>{selectedModelLabel}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {preset.suggestedModels.map((m) => (

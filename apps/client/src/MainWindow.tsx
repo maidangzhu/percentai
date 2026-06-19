@@ -8,7 +8,6 @@ import { PeopleView } from "@/views/PeopleView";
 import { TasksView } from "@/views/TasksView";
 import { SettingsView } from "@/views/SettingsView";
 import { PermissionsView } from "@/views/PermissionsView";
-import { LocalTestView } from "@/views/LocalTestView";
 import { WelcomeView } from "@/views/WelcomeView";
 import {
   useLogs,
@@ -207,7 +206,6 @@ const toggleScreenshot = async () => {
           onCacheCleared={() => invalidateAll()}
         />
       )}
-      {activeKey === "local_test" && <LocalTestView />}
     </AppShell>
   );
 }
