@@ -54,7 +54,7 @@ export function ReplyMock() {
       </ul>
 
       <div className="border-t border-[color:var(--color-ink-border)] px-3.5 py-1.5 text-[10.5px] text-ink-muted">
-        <span className="font-mono">⌘V</span> 发送
+        <span className="font-mono">⌘V</span> 粘贴
       </div>
     </div>
   );

@@ -31,14 +31,14 @@ export function Hero() {
             聊完天，
             <br />
             <span className="font-serif italic font-normal text-muted-foreground">
-              任务
+              记忆
             </span>{" "}
-            已经在日历上。
+            留在本地。
           </h1>
 
           <p className="max-w-xl text-pretty text-[17px] leading-relaxed text-muted-foreground">
-            本地 AI 读每条新消息，把对话里的承诺和任务自动捞出来，弹给你确认。
-            永远不上传，永远不替你做决定。
+            Percent 在你的 Mac 上记录聊天上下文。需要回复时截屏起草，
+            需要回忆时问屏幕；数据存在本地 SQLite，LLM 请求只直连你配置的 provider。
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -65,7 +65,7 @@ export function Hero() {
           </div>
         </div>
 
-        {/* The demo — chat on the left, tasks panel on the right */}
+        {/* The demo — chat on the left, local memory panel on the right */}
         <div className="mt-20 sm:mt-24">
           <HeroDemo />
         </div>

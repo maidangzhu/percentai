@@ -11,7 +11,7 @@ export function Privacy() {
           <header className="stagger flex flex-col">
             <div className="text-mono-caps text-muted-foreground">03 — 隐私</div>
             <h2 className="text-display mt-4 text-balance text-[36px] font-semibold leading-[1.1] sm:text-[44px]">
-              聊天、任务、联系人，
+              聊天、截图、API key，
               <br />
               <span className="font-serif italic font-normal text-muted-foreground">
                 全部在你硬盘上。
@@ -19,7 +19,7 @@ export function Privacy() {
             </h2>
             <p className="mt-5 max-w-md text-pretty text-[16px] leading-relaxed text-muted-foreground">
               默认 BYOK —— 客户端直连你配置的 LLM provider，
-              <strong className="font-medium text-foreground">聊天 / 任务 / 截图 / API key</strong>
+              <strong className="font-medium text-foreground">聊天 / 联系人 / 截图 / API key</strong>
               一个字节都不上 Percent 的服务器。你随时可以打开 Finder 看那张 .db。
             </p>
 
@@ -30,11 +30,10 @@ export function Privacy() {
                 覆盖
               </Bullet>
               <Bullet icon={<Lock size={14} strokeWidth={1.75} />}>
-                SQLite 本地文件，5 张表（logs / people / chat_turns / chat_messages
-                / tasks），snowflake id
+                SQLite 本地文件，聊天日志、联系人、对话轮次和消息都用 snowflake id
               </Bullet>
               <Bullet icon={<Network size={14} strokeWidth={1.75} />}>
-                外发请求只到你的 LLM provider（OpenAI / Anthropic / Moonshot / MiniMax 等）——
+                外发请求只到你配置的 LLM provider（OpenAI / MiniMax）——
                 Tauri Rust 侧绕过 WebView CORS，URL 白名单在 capabilities 里
               </Bullet>
             </ul>
@@ -75,10 +74,8 @@ const TREE: Node[] = [
   { name: "people", meta: "32 rows", rows: 32 },
   { name: "chat_turns", meta: "1,847 rows", rows: 1847 },
   { name: "chat_messages", meta: "12,094 rows", rows: 12094 },
-  { name: "tasks", meta: "12 rows", rows: 12 },
   { name: "screenshots/", type: "dir" },
   { name: "bubble-pipeline.log", type: "file" },
-  { name: "server-pipeline.log", type: "file" },
   { name: "settings.json", type: "file" },
 ];
 
@@ -162,7 +159,7 @@ function FileTree() {
 
       <div className="flex items-center justify-between border-t border-[color:var(--color-border)] bg-muted/40 px-4 py-2 text-[10.5px] text-muted-foreground">
         <span className="font-mono">
-          5 tables · 雪花 id · WAL mode
+          local tables · 雪花 id · WAL mode
         </span>
         <span className="font-mono">v0.1 · schema frozen</span>
       </div>

@@ -12,8 +12,8 @@
 
 微信里按 Enter，这条对话自动存下来 — 不切窗口、不截图、不点按钮。
 截个屏，它读上下文、生成得体的回复，⌘V 直接发（永远不替你发）。
-淹没在对话里的"明天下午你过来看看"自动捞出来，弹给你确认再写库。
-"上次答应过这个客户什么事" — 截个屏一句话问它，它翻你本地记录再答你。
+"上次和这个客户聊到哪" — 截个屏一句话问它，它翻你本地记录再答你。
+所有 LLM 请求都走 BYOK，直连你配置的 provider，不经过 Percent 云端。
 
 ---
 
@@ -21,8 +21,8 @@
 
 - **按 Enter 自动留痕** — 微信里按回车，这条对话自动存下来。想翻"上周和谁聊过什么"不用滚聊天记录。
 - **帮我回** — 截个屏，它读上下文，生成得体的回复，⌘V 直接发。**永远不自动发送**，粘贴前你能看见、能改。
-- **记任务** — "明天下午你过来看看"、"回头把资料发我" — 这种隐性 todo 自动捞出来，弹确认后再写库；可选同步到 macOS Calendar。
-- **问屏幕** — "这个人是谁"、"上次答应过这个客户什么事" — 截个屏一句话问它，它用工具（找人、查聊天、记任务、起草回复）持续多轮回答。
+- **本地记忆** — 聊天上下文、联系人、Agent 对话和截图缓存都在本机 SQLite / 本地文件里。
+- **问屏幕** — "这个人是谁"、"上次和这个客户聊到哪" — 截个屏一句话问它，它用本地记录持续多轮回答。
 
 ---
 
@@ -40,9 +40,9 @@ pnpm dev
 - `percent-cms`（Next.js，端口默认 3000，运营用）
 - `percent-landing`（Vite，端口默认 5180）
 
-> **BYOK 是默认模式**：LLM 调用完全直连你配置的 provider（OpenAI / Anthropic / Moonshot / MiniMax 等），不经任何 Percent 服务器。CORS 由 Tauri 的 Rust 侧绕过（`tauri-plugin-http`），provider URL 在 `apps/client/src-tauri/capabilities/default.json` 里白名单。
+> **BYOK 是默认模式**：LLM 调用完全直连你配置的 provider（OpenAI / MiniMax），不经任何 Percent 服务器。CORS 由 Tauri 的 Rust 侧绕过（`tauri-plugin-http`），provider URL 在 `apps/client/src-tauri/capabilities/default.json` 里白名单。
 >
-> 首次启动 → 主窗口 → Settings → BYOK section → 填 provider + 模型 + API key → 保存。配置完成后所有 AI 功能（按 Enter 留痕 / 帮我回 / 记任务 / 问屏幕）才能工作。
+> 首次启动 → 主窗口 → Settings → BYOK section → 选择 provider + 模型 + API key → 保存。配置完成后所有 AI 功能（按 Enter 留痕 / 帮我回 / 问屏幕）才能工作。目前保留 OpenAI `gpt-5.5` 和 MiniMax `MiniMax-M3`。
 
 首次启动会引导你授予 macOS 三类权限：屏幕录制、辅助功能、输入监控。  
 授权后重启应用生效。
@@ -57,7 +57,7 @@ pnpm dev
 percent/
 ├── apps/
 │   ├── client/      # Tauri macOS 客户端 (React + Vite + Tailwind + Rust)
-│   ├── server/      # Hono 后端 (历史 cloud 模式代码，保留但不 deploy)
+│   ├── server/      # Hono 后端 (历史代码，当前客户端不依赖)
 │   ├── cms/         # 内部运营 CMS (Next.js)
 │   └── landing/     # 官网 thepercentai.com (Vite + React)
 ├── packages/
@@ -71,7 +71,7 @@ percent/
 └── README.md
 ```
 
-> `apps/server` 目录保留了之前的 Hono 代码（之前曾是 Cloud 模式：server 转发 LLM + 积分扣费），但 dev / deploy 都已经切走——`pnpm dev` 不再启动它。如需恢复旧 cloud 模式可用 `pnpm dev:server` 显式启动。
+> 当前客户端是 local-first + BYOK 直连架构，不依赖 `apps/server` 转发 LLM，也没有云端内容库。
 
 ---
 

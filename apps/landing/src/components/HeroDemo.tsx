@@ -9,42 +9,42 @@ type Message = {
   time: string;
 };
 
-type Task = {
+type MemoryRecord = {
   id: string;
-  text: string;
-  due: string;
-  evidence: string;
+  title: string;
+  meta: string;
+  detail: string;
 };
 
 const MESSAGES: Message[] = [
-  { id: "m1", from: "them", text: "晚上回家记得去超市买点菜", time: "14:32" },
-  { id: "m2", from: "them", text: "对了今天看看猫粮还够不够，不够的话买一袋", time: "14:32" },
-  { id: "m3", from: "me", text: "好嘞", time: "14:33" },
+  { id: "m1", from: "them", text: "上次那个 A 方案报价，口径还按旧版吗？", time: "14:32" },
+  { id: "m2", from: "them", text: "我这边准备今晚发给老板看", time: "14:32" },
+  { id: "m3", from: "me", text: "按旧版，税费单列", time: "14:33" },
 ];
 
-const TASKS: Task[] = [
+const MEMORY_RECORDS: MemoryRecord[] = [
   {
-    id: "t1",
-    text: "去超市买菜",
-    due: "今晚",
-    evidence: "晚上回家记得去超市买点菜",
+    id: "r1",
+    title: "当前对话",
+    meta: "Enter · just now",
+    detail: "对象问 A 方案报价口径，你回复：按旧版，税费单列。",
   },
   {
-    id: "t2",
-    text: "看猫粮，不够买一袋",
-    due: "今天",
-    evidence: "对了今天看看猫粮还够不够，不够的话买一袋",
+    id: "r2",
+    title: "历史上下文",
+    meta: "SQLite · 4 days ago",
+    detail: "上次确认过：A 方案保持旧版范围，税费和实施费拆开展示。",
   },
 ];
 
 // Animation steps:
-//   0  initial (them messages already visible, no bubble, no tasks panel)
+//   0  initial (them messages already visible, no bubble, no memory panel)
 //   1  user pressed Enter → "好嘞" message appears in chat
-//   2  bubble pops in (Percent captured the screen, surfaces the catch)
+//   2  bubble pops in (Percent captured this session context)
 //   3  bubble is processing
-//   4  tasks panel slides in (still loading)
-//   5  task 1 in
-//   6  task 2 in
+//   4  local memory panel slides in
+//   5  current record in
+//   6  historical record in
 //   7  hold
 //   8  reset
 const STEP_DELAYS = [1000, 1000, 1000, 1000, 500, 500, 1500, 1500] as const;
@@ -71,7 +71,7 @@ export function HeroDemo() {
   return (
     <div className="grid items-stretch gap-4 md:grid-cols-[1.55fr_1fr] md:gap-5">
       <ChatPanel step={step} />
-      <TasksArea step={step} />
+      <MemoryArea step={step} />
     </div>
   );
 }
@@ -215,7 +215,7 @@ function Bubble({ step }: { step: number }) {
                   className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12px]"
                 >
                   <Check size={12} strokeWidth={2.25} />
-                  <span>捞到 2 个</span>
+                  <span>已存本地</span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -226,12 +226,12 @@ function Bubble({ step }: { step: number }) {
   );
 }
 
-function TasksArea({ step }: { step: number }) {
-  const showTasks = step >= 4;
+function MemoryArea({ step }: { step: number }) {
+  const showMemory = step >= 4;
   return (
     <div className="relative h-full min-h-[360px]">
       <AnimatePresence mode="wait">
-        {!showTasks ? (
+        {!showMemory ? (
           <motion.div
             key="placeholder"
             initial={{ opacity: 0 }}
@@ -244,10 +244,10 @@ function TasksArea({ step }: { step: number }) {
               <span className="font-mono text-[14px] font-semibold">%</span>
             </div>
             <div className="mt-3 text-mono-caps text-muted-foreground">
-              tasks
+              local memory
             </div>
             <div className="mt-1.5 text-center text-[12px] text-muted-foreground/65">
-              按 Enter 发送后出现
+              按 Enter 后写入本地
             </div>
           </motion.div>
         ) : (
@@ -262,23 +262,23 @@ function TasksArea({ step }: { step: number }) {
             <div className="flex items-center justify-between border-b border-[color:var(--color-ink-border)] px-4 py-2.5">
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-ink-fg/70" />
-                <span className="text-[12px] text-ink-fg/85">任务</span>
+                <span className="text-[12px] text-ink-fg/85">本地记忆</span>
               </div>
-              <div className="text-mono-caps text-ink-muted">2 candidates</div>
+              <div className="text-mono-caps text-ink-muted">SQLite</div>
             </div>
 
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
               <AnimatePresence>
-                {TASKS.map((task, i) =>
+                {MEMORY_RECORDS.map((record, i) =>
                   step > 4 + i ? (
-                    <TaskCard key={task.id} task={task} />
+                    <MemoryCard key={record.id} record={record} />
                   ) : null,
                 )}
               </AnimatePresence>
             </div>
 
             <div className="border-t border-[color:var(--color-ink-border)] px-4 py-2 text-[10.5px] text-ink-muted">
-              <span className="font-mono">⌘+Enter</span> 确认全部
+              后续问屏幕时，只查这台 Mac 上的记录
             </div>
           </motion.div>
         )}
@@ -287,7 +287,7 @@ function TasksArea({ step }: { step: number }) {
   );
 }
 
-function TaskCard({ task }: { task: Task }) {
+function MemoryCard({ record }: { record: MemoryRecord }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.95 }}
@@ -296,28 +296,19 @@ function TaskCard({ task }: { task: Task }) {
       transition={{ duration: 0.35, ease: EASE_OUT }}
       className="rounded-lg border border-[color:var(--color-ink-border)] bg-white/[0.025] p-3.5"
     >
-      <div className="text-[14.5px] font-medium leading-snug text-ink-fg">
-        {task.text}
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[14.5px] font-medium leading-snug text-ink-fg">
+          {record.title}
+        </div>
+        <div className="shrink-0 rounded-sm border border-[color:var(--color-ink-border)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-muted">
+          saved
+        </div>
       </div>
       <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-muted">
-        due · {task.due}
+        {record.meta}
       </div>
       <div className="mt-2.5 rounded-md border border-[color:var(--color-ink-border)] bg-white/[0.02] px-2.5 py-1.5 text-[12px] leading-relaxed text-ink-fg/80">
-        "{task.evidence}"
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          className="flex-1 rounded-md bg-ink-fg px-3 py-1.5 text-[12px] font-medium text-ink-bg transition-opacity hover:opacity-90"
-        >
-          确认
-        </button>
-        <button
-          type="button"
-          className="flex-1 rounded-md border border-[color:var(--color-ink-border)] px-3 py-1.5 text-[12px] text-ink-fg/85 transition-colors hover:bg-white/[0.04]"
-        >
-          跳过
-        </button>
+        {record.detail}
       </div>
     </motion.div>
   );

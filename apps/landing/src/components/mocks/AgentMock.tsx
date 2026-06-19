@@ -45,7 +45,7 @@ export function AgentMock() {
             <br />
             · 报价单本周发到对方邮箱
             <br />
-            要不要现在加到任务里？
+            我可以按这两点帮你起草一段回复。
           </div>
         </div>
       </div>

@@ -72,16 +72,16 @@ const PRINCIPLES = [
   {
     tag: "原则 01",
     title: "不替你做决定",
-    body: "回复都是建议，粘贴前看得见。任务要你点头才进表。",
+    body: "回复都是建议，粘贴前看得见。Percent 永远不替你发送消息。",
   },
   {
     tag: "原则 02",
     title: "数据全在你硬盘",
-    body: "聊天、任务、联系人都在 ~/.percent-tracker/percent.db。",
+    body: "聊天上下文、联系人、截图和设置都留在 ~/.percent-tracker/。",
   },
   {
     tag: "原则 03",
-    title: "宁可漏，不要错",
-    body: "task detector 有 fingerprint + 双层去重，宁可不再弹，不愿错弹。",
+    title: "直连你的 provider",
+    body: "BYOK 是默认路径。LLM 请求从本机发出，不经过 Percent server 转发。",
   },
 ];

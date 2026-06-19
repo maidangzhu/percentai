@@ -1,5 +1,5 @@
 import { ReplyMock } from "../components/mocks/ReplyMock";
-import { TaskMock } from "../components/mocks/TaskMock";
+import { MemoryMock } from "../components/mocks/MemoryMock";
 import { AgentMock } from "../components/mocks/AgentMock";
 
 export function Capabilities() {
@@ -21,7 +21,7 @@ export function Capabilities() {
           </h2>
           <p className="mt-5 max-w-xl text-pretty text-[16px] text-muted-foreground">
             自动留痕是地基。盖在它上面的，是三件你可能用得着的小事：
-            起一段得体的回话、捞一个淹没在聊天里的待办、问一句「上次答应过这个人什么」。
+            起一段得体的回话、沉淀本地上下文、问一句「上次和这个人聊到哪」。
           </p>
         </header>
 
@@ -35,10 +35,10 @@ export function Capabilities() {
           />
           <Capability
             index="02"
-            title="记任务"
-            subtitle="抓待办"
-            description="「明天下午你过来看看」这种淹没在对话里的 to-do，自动捞出来弹给你确认。"
-            mock={<TaskMock />}
+            title="本地记忆"
+            subtitle="Local memory"
+            description="按 Enter 留下聊天上下文，之后问「上次聊到哪」不用翻微信记录。"
+            mock={<MemoryMock />}
           />
           <Capability
             index="03"
