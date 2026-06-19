@@ -27,7 +27,7 @@ const MEMORY_RECORDS: MemoryRecord[] = [
     id: "r1",
     title: "当前对话",
     meta: "Enter · just now",
-    detail: "对象问 A 方案报价口径，你回复：按旧版，税费单列。",
+    detail: "客户问 A 方案报价口径，你回复：按旧版，税费单列。",
   },
   {
     id: "r2",
@@ -86,7 +86,7 @@ function ChatPanel({ step }: { step: number }) {
           <span className="h-2.5 w-2.5 rounded-full bg-[oklch(0.8_0_0)]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[oklch(0.85_0_0)]" />
         </div>
-        <div className="text-mono-caps text-muted-foreground">微信 · 对象</div>
+        <div className="text-mono-caps text-muted-foreground">微信 · 客户</div>
         <div className="w-12" />
       </div>
 
@@ -96,7 +96,7 @@ function ChatPanel({ step }: { step: number }) {
           对
         </div>
         <div className="min-w-0">
-          <div className="text-[14px] font-medium leading-tight">对象</div>
+          <div className="text-[14px] font-medium leading-tight">客户</div>
           <div className="text-[11px] text-muted-foreground">WeChat</div>
         </div>
       </div>
@@ -126,7 +126,7 @@ function ChatPanel({ step }: { step: number }) {
       {/* input bar — Percent captures the screen *because* the user pressed Enter here */}
       <div className="flex items-center gap-2 border-t border-[color:var(--color-border)] bg-muted/30 px-4 py-2.5">
         <span className="font-mono text-[12.5px] text-muted-foreground/55">
-          回复 对象…
+          回复 客户…
         </span>
         <span className="ml-1 inline-block h-3.5 w-px animate-cursor bg-foreground/70" />
         <span className="ml-auto font-mono text-[10.5px] text-muted-foreground/50">

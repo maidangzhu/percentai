@@ -12,7 +12,7 @@ export function MemoryMock() {
       <div className="space-y-2.5 px-3.5 py-3.5">
         {[
           ["Enter", "刚刚保存了当前聊天截图和识别出的文字"],
-          ["Contact", "对象 · 最近 14 天对话上下文"],
+          ["Contact", "客户 · 最近 14 天对话上下文"],
           ["Search", "问屏幕时只查这台 Mac 上的记录"],
         ].map(([label, text]) => (
           <div
