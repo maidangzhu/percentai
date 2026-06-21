@@ -1,4 +1,94 @@
-# Percent 当前状态 + 接下来的修法（2026-06-17）
+# archive 已归档
+# Percent v2 当前状态 + 开发进度（2026-06-21）
+
+> 当前活跃分支：`rebuild/v2-local-first`。旧实现已归档到 `archive/legacy-v1/`，新开发区在 `v2/`。
+
+## v2 TL;DR
+
+| 维度 | 当前状态 |
+|---|---|
+| **产品方向** | Local-first + BYOK-first + suggestion only + Calendar-driven |
+| **本地真源** | SQLite 是业务数据真源；Zustand 只存 UI/runtime state |
+| **工作流边界** | 核心能力走 `replyWorkflow` / `enterCaptureWorkflow` / `askScreenWorkflow`，UI 不直接写 SQL、不拼 provider request |
+| **Provider 边界** | provider 差异只在 `services/intelligence` profile/adapter 层；API key 优先存 OS keychain，SQLite 只存 `apiKeyRef` |
+| **当前代码进度** | v2 OpenSpec baseline + 最小 Tauri readiness shell 已提交 |
+| **当前 commit** | `982f8c0 feat: bootstrap v2 readiness shell` |
+| **未做** | SQLite schema/repositories、BYOK profile/keychain、真实 screen/keyboard/calendar plugins、Reply/Enter/Ask workflows |
+
+## v2 已完成
+
+1. **OpenSpec baseline**
+   - 建立 `v2/openspec/README.md`
+   - 建立 baseline change：`v2/openspec/changes/bootstrap-local-first-p0`
+   - 建立第一批 capability specs：
+     - `app-readiness-onboarding`
+     - `intelligence-byok`
+     - `screen-permissions`
+     - `reply-suggestion`
+     - `enter-capture`
+     - `ask-screen`
+     - `calendar`
+
+2. **App readiness / setup shell**
+   - 建立 `v2` pnpm workspace
+   - 建立 `v2/apps/client` React + Vite + Tauri 2 最小客户端
+   - Tauri command 已提供：
+     - native runtime info
+     - local data dir
+     - macOS permission status
+     - open permission settings
+   - Home 展示 readiness checklist 和核心动作 disabled reason
+   - Settings 展示 Intelligence / Permissions / App 外观与语言入口
+   - 主题参考 `~/maidang/anarlog` 的轻量做法：`.dark` class + semantic CSS tokens
+   - i18n 用轻量 provider + `en` / `zh` 字典，未引入 Lingui，避免当前阶段架构臃肿
+
+## v2 开发顺序
+
+P0 按这个顺序推进：
+
+| 顺序 | 模块 | 状态 | 目标 |
+|---|---|---|---|
+| 1 | App readiness and setup | ✅ shell done | 进入应用不被权限/provider 阻塞；核心动作可见并解释 disabled reason |
+| 2 | Intelligence / BYOK provider profile | ⏭ next | provider preset、custom OpenAI-compatible、OS keychain、text/image/streaming tests |
+| 3 | Screen capture and permissions | 待做 | typed Tauri screen/permission APIs；screen recording/accessibility/input monitoring 降级 |
+| 4 | Local SQLite foundation | 待做 | migrations + repositories；`workflow_runs` / `ai_events` / captures / logs 等 P0 表 |
+| 5 | Reply Suggestion workflow | 待做 | `replyWorkflow.run()`；截图 + 本地上下文 + 3 条可见建议；永不自动发送 |
+| 6 | Enter Capture workflow | 待做 | keyboard event -> queue/dedupe -> capture/analyze/persist；后台低打扰 |
+| 7 | Ask Screen workflow | 待做 | session start 截图一次；第一条 query 带图；后续默认不带图 |
+| 8 | Contacts | 待做 | 本地关系索引、联系人详情、聊天摘要、Calendar 关联 |
+| 9 | Calendar | 待做 | suggested candidates；用户确认后写 Apple Calendar |
+
+## v2 当前验证命令
+
+```bash
+cd v2
+pnpm typecheck
+pnpm build
+cd apps/client/src-tauri
+cargo check
+```
+
+启动原生客户端：
+
+```bash
+cd v2
+pnpm dev
+```
+
+## v2 下一步
+
+下一步先做 **Intelligence / BYOK provider profile**，但仍按 OpenSpec 方法：
+
+1. 为 `intelligence-byok` 建 implementation change。
+2. 设计本地 profile schema 和 repository 接口。
+3. 加 OS keychain command，SQLite 只存 `apiKeyRef`。
+4. 做 provider preset + custom OpenAI-compatible profile UI。
+5. 做 Text / Image / Streaming tests，并把结果反映到 readiness。
+6. 所有 LLM test 调用写入 `ai_events`。
+
+---
+
+# Percent legacy/v1 当前状态 + 接下来的修法（2026-06-17）
 
 > 跟产品方向 / 隐私边界 / 架构选型 相关的"非显而易见"事实。**新成员 onboarding 先读这份**。
 
