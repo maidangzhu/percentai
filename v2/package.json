@@ -1,0 +1,21 @@
+{
+  "name": "percent-v2",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm --filter @percent-v2/client dev",
+    "build": "pnpm --filter @percent-v2/client build",
+    "typecheck": "pnpm --filter @percent-v2/client typecheck"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "~5.6.0",
+    "vite": "^6.0.0"
+  }
+}
+
