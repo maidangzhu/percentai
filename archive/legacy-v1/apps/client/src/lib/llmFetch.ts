@@ -1,4 +1,5 @@
-// Patch `globalThis.fetch` with Tauri 2's Rust-backed fetch (tauri-plugin-http).
+// Historical note: we previously patched `globalThis.fetch` with Tauri 2's
+// Rust-backed fetch (tauri-plugin-http).
 //
 // Why: pi-ai internally constructs `new OpenAI({ apiKey, baseURL })` without
 // passing a custom `fetch`. The OpenAI SDK then falls back to
@@ -13,10 +14,10 @@
 // also enforces a per-capability URL allowlist, so we explicitly include
 // the providers we need in `apps/client/src-tauri/capabilities/default.json`.
 //
-// This file is intentionally empty of side effects now — the actual
-// `fetch` is wired up explicitly in `packages/runtime/src/minimaxStream.ts`
-// via `new OpenAI({ fetch: tauriFetch, ... })` and in pi-ai's other
-// providers. Monkey-patching `globalThis.fetch` is risky in dev mode
+// This file is intentionally empty of side effects now — the actual `fetch`
+// is wired up explicitly through `streamPercentDirect(..., { fetch })` and
+// passed into the OpenAI-compatible adapters. Monkey-patching
+// `globalThis.fetch` is risky in dev mode
 // (every Vite HMR reload, every test re-import re-patches and can
 // interleave with React Strict Mode's double-mount). Keep this file as
 // a documentation pointer only.

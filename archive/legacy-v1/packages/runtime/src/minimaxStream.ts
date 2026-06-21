@@ -11,8 +11,8 @@
 //
 // This file is a small case-by-case adapter that:
 //   1. Calls MiniMax's OpenAI-compatible endpoint directly via the OpenAI SDK
-//      (which already uses `globalThis.fetch`, patched to tauri-plugin-http
-//      by `@/lib/llmFetch` so CORS is bypassed).
+//      and accepts an explicit `fetch` implementation so Tauri can route
+//      requests through tauri-plugin-http instead of WebView fetch.
 //   2. Parses each streaming chunk and emits the right `AssistantMessageEvent`
 //      sequence so pi-agent-core's loop is happy:
 //        - `content`     → text block
@@ -24,11 +24,10 @@
 //      off entirely when they only need the final reply.
 //
 // Why this lives in the client app (not in `@percent/runtime`):
-//   the OpenAI SDK and `@tauri-apps/plugin-http` are not part of the runtime
-//   package. The runtime's `streamPercentDirect` detects `model.id` and
-//   dispatches to this function for MiniMax-M3, otherwise to pi-ai's own
-//   `stream()`. Anything that goes through this path is BYOK — no server
-//   proxy, no credit deduction.
+//   M3 needs provider-specific streaming parsing for `reasoning_details`.
+//   Other OpenAI-compatible models use `streamOpenAICompat`.
+//   Anything that goes through this path is BYOK — no server proxy,
+//   no credit deduction.
 
 import OpenAI from "openai";
 import {

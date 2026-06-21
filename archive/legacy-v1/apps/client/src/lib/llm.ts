@@ -53,6 +53,14 @@ interface ByokModel {
   apiKey: string;
 }
 
+function resolveProviderFetch(): typeof globalThis.fetch {
+  const testFetch = (globalThis as { __percent_test_llm_fetch?: unknown }).__percent_test_llm_fetch;
+  if (typeof testFetch === "function") {
+    return testFetch as typeof globalThis.fetch;
+  }
+  return tauriFetch as unknown as typeof globalThis.fetch;
+}
+
 async function resolveByokModel(): Promise<ByokModel> {
   const config = loadByokConfig();
   const apiKey = await loadByokKey();
@@ -120,7 +128,7 @@ async function collectStreamText(
     apiKey,
     signal: options.signal,
     disableThinking: options.disableThinking,
-    fetch: tauriFetch as unknown as typeof globalThis.fetch,
+    fetch: resolveProviderFetch(),
   });
   let text = "";
   let stopReason = "error";

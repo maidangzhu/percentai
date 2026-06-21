@@ -80,6 +80,7 @@ function makeFetchStub() {
 }
 
 const fetchStub = mock.method(globalThis, "fetch", makeFetchStub());
+(globalThis as Record<string, unknown>).__percent_test_llm_fetch = globalThis.fetch;
 
 // Stub the Tauri `invoke` for `get_byok_key` by routing through
 // `globalThis.__percent_test_byok_key`. The `byokConfig.ts` module reads

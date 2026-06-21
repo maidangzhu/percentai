@@ -28,6 +28,7 @@ export {
   type ProviderPreset,
 } from "./providers.js";
 export { streamMiniMax, type StreamMiniMaxOptions } from "./minimaxStream.js";
+export { streamOpenAICompat, type StreamOpenAICompatOptions } from "./openAICompatStream.js";
 
 import {
   Agent,
@@ -47,6 +48,7 @@ import {
 } from "@earendil-works/pi-ai";
 
 import { streamMiniMax, type StreamMiniMaxOptions } from "./minimaxStream.js";
+import { streamOpenAICompat, type StreamOpenAICompatOptions } from "./openAICompatStream.js";
 
 export interface PercentModelOptions {
   id?: string;
@@ -84,8 +86,8 @@ export interface StreamPercentDirectOptions {
   /**
    * Custom fetch implementation. Pass
    * `@tauri-apps/plugin-http`'s `fetch` in the Tauri WebView to bypass
-   * CORS. Without it, pi-ai's openai-completions stream falls back to
-   * `globalThis.fetch` (which is CORS-restricted).
+   * CORS and honor Tauri's HTTP capability allowlist for arbitrary BYOK
+   * provider hosts.
    */
   fetch?: typeof globalThis.fetch;
   [key: string]: unknown;
@@ -97,15 +99,14 @@ export interface StreamPercentDirectOptions {
  * Dispatches by `model.id`:
  *   - MiniMax-M3 → `streamMiniMax` (custom adapter that understands M3's
  *     `reasoning_details[]` and `thinking`/`reasoning_split` fields).
+ *   - openai-completions → `streamOpenAICompat` (OpenAI-compatible adapter
+ *     that accepts custom `fetch`, required for arbitrary BYOK hosts in Tauri).
  *   - everything else → pi-ai's own `stream()`, which routes by `model.api`
- *     (`openai-completions` / `anthropic-messages` / `google-generative-ai` /
- *     `mistral-conversations`).
+ *     (`anthropic-messages` / `google-generative-ai` / `mistral-conversations`).
  *
  * For CORS bypass in the Tauri WebView, pass `options.fetch =
  * tauriPluginHttpFetch` (import `@tauri-apps/plugin-http` and use its
- * `fetch` export). The default behaviour — using `globalThis.fetch` —
- * is fine in Node / test environments but fails for providers that
- * reject non-browser origins.
+ * `fetch` export). Node tests can pass a stub fetch directly.
  */
 export function streamPercentDirect(
   model: Model<any>,
@@ -122,6 +123,13 @@ export function streamPercentDirect(
       disableThinking: options.disableThinking,
       fetch: options.fetch,
     } as StreamMiniMaxOptions);
+  }
+  if (model.api === "openai-completions") {
+    return streamOpenAICompat(model, context, {
+      ...options,
+      apiKey: options.apiKey,
+      fetch: options.fetch,
+    } as StreamOpenAICompatOptions);
   }
   return piStream(model, context, options as Parameters<typeof piStream>[2]);
 }

@@ -1246,7 +1246,7 @@ export default function Bubble() {
         // the long-running `captureCurrentScreen` + LLM call kicks off.
         // Otherwise the user sees the macOS "spinning beachball" between
         // clicking the menu item and any visible feedback.
-        requestAnimationFrame(() => void generateReplySuggestion());
+        generateReplySuggestion();
         break;
       case "main":
         void openMainWindow();
