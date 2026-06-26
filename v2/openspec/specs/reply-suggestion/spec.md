@@ -1,85 +1,49 @@
-# Spec: Reply Suggestion
+# Spec: Reply Suggestion (DEPRECATED)
+
+## Status
+
+This spec is deprecated and is no longer part of Percent v2 P0.
+
+The single "ask the agent" interaction in v2 lives in `chat-panel`. There is no separate Reply workflow, and there is no "Reply" button in the UI.
+
+The historical content of this spec is preserved below for reference only.
+
+---
+
+# Spec: Reply Suggestion (historical)
 
 ## ADDED Requirements
 
-### Requirement: Suggestion-only reply workflow
+### Requirement: Suggestion-only reply workflow (historical)
 
-Reply Suggestion SHALL generate visible suggestions and SHALL never send messages automatically.
+Reply Suggestion generated visible suggestions and never sent messages automatically. This requirement is now satisfied by the chat panel's behavior: every agent response is visible and copyable, and no message is sent automatically.
 
-#### Scenario: User clicks Reply
+### Requirement: Three suggestions (historical)
 
-- **WHEN** the user invokes Reply from Bubble, shortcut, or Agent
-- **THEN** all entrances call `replyWorkflow.run`
-- **AND** the workflow returns suggestions for the UI to display
-- **AND** no workflow or UI sends text to the chat app
+Reply Suggestion returned three normalized suggestions by default. This requirement is replaced by chat-panel free-form agent responses. The "three suggestions" affordance is not a product feature in v2.
 
-### Requirement: Three suggestions
+### Requirement: Workflow audit (historical)
 
-Reply Suggestion SHALL return three normalized suggestions by default.
+Each Reply run created `workflow_runs` and every LLM call created `ai_events`. The same audit requirements now apply to the chat panel workflow.
 
-#### Scenario: Provider returns valid response
+### Requirement: Degraded behavior (historical)
 
-- **WHEN** the provider response validates
-- **THEN** the output contains `stable`, `natural`, and `short` suggestions
-- **AND** each suggestion is visible and copyable
+Reply degraded based on provider and permission readiness. The chat panel uses the same readiness model.
 
-### Requirement: Workflow audit
+### Requirement: Context minimization (historical)
 
-Each Reply run SHALL create `workflow_runs` and every LLM call SHALL create `ai_events`.
-
-#### Scenario: Reply succeeds
-
-- **WHEN** Reply starts
-- **THEN** a `workflow_runs` row is created with type `reply` and a trace ID
-- **AND** the LLM request writes an `ai_events` row
-- **AND** the workflow run is marked succeeded on completion
-
-### Requirement: Degraded behavior
-
-Reply SHALL degrade based on provider and permission readiness.
-
-#### Scenario: No provider exists
-
-- **WHEN** no default provider profile exists
-- **THEN** Reply returns `needs_provider`
-- **AND** it does not call screen capture or AI
-
-#### Scenario: Image is unsupported
-
-- **WHEN** the provider supports text but not image
-- **THEN** Reply may use text-only fallback if local context exists
-- **AND** otherwise explains that image support is required
-
-### Requirement: Context minimization
-
-Reply prompts SHALL include only necessary context.
-
-#### Scenario: Prompt is built
-
-- **WHEN** the workflow builds a prompt
-- **THEN** it may include current screenshot, current app/window metadata, recent messages for the detected contact/thread, contact info, and optional user instruction
-- **AND** it does not include unrelated contacts, full chat history, API keys, or debug logs
+Reply prompts included only necessary context. The chat panel uses the same prompt minimization.
 
 ## UI States
 
-- **Idle:** Reply button is visible.
-- **Loading:** show capture, context loading, and generation progress.
-- **Ready:** show three stable-size suggestion blocks with Copy and optional Regenerate.
-- **Error:** show specific failure and repair action.
-- **Disabled:** show missing provider, missing image support, or missing screen permission.
+The Reply-specific UI states are removed. The chat panel defines its own states.
 
 ## Data Impact
 
-- `workflow_runs.type = "reply"`
-- `ai_events.request_kind = "reply_suggestion"`
-- `captures` row when screenshot succeeds
-- Optional future `reply_suggestions` table if reply history becomes productized
+There is no `workflow_runs.type = "reply"` in v2. Chat panel runs use `workflow_runs.type = "chat_panel"`. The `ai_events.request_kind = "reply_suggestion"` is removed.
 
 ## Acceptance Criteria
 
-- No automatic sending path exists.
-- Duplicate clicks within 3 seconds do not create parallel Reply runs from the same UI entrance.
-- Schema-invalid provider responses retry once and then fail with `invalid_response`.
-- No provider does not call screen capture or AI.
-- Provider failures are reflected in both workflow result and `ai_events`.
-
+- No Reply workflow exists in v2.
+- No Reply button exists in the v2 UI.
+- The chat panel is the only path that produces visible agent output.
