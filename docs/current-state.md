@@ -1,4 +1,3 @@
-# archive 已归档
 # Percent v2 当前状态 + 开发进度（2026-06-21）
 
 > 当前活跃分支：`rebuild/v2-local-first`。旧实现已归档到 `archive/legacy-v1/`，新开发区在 `v2/`。
@@ -272,3 +271,79 @@ const response = await fetch(`${baseUrl}/chat/completions`, {
 - **provider URL 白名单严格**（7-8 个 baseUrl + localhost）。用户加陌生 provider 要改 capabilities 文件 + 重 build
 - **登录页删除**（AuthView.tsx 整个删了）。MainWindow 不再 auth-gate
 - **server 代码保留不删**：未来想恢复 cloud 模式可以 `git revert` 当时 PR；当前 dev script (`pnpm dev`) 不再启 server，用 `pnpm dev:server` 显式启
+
+---
+
+## 9. 2026-06-26 更新：v2 产品形态重整 + 文档/spec 全面重写
+
+**本节覆盖 v2 之前全部节**。Percent v2 的产品形态从"多 workflow"重整为"单一主交互 + 一次下载 + 抗录屏"。
+
+### 9.1 形态重整
+
+| 维度 | 旧（v2 P0 初版）| 新（v2 P0 当前）|
+|---|---|---|
+| **主交互** | Reply / Enter / Ask Screen 三套 workflow | 一个 chat panel |
+| **气泡** | dot + bar 两段；click 打开 popover | dot / bar / panel 三段；Swift NSPanel；窗口 frame 动画 |
+| **截图策略** | session-start 整屏 + "Refresh Screen" 按钮 | session-start 整屏一次，没有 Refresh 按钮 |
+| **选区截图** | 在 spec 里有提及 | 删除。没有用户画框的 UI |
+| **Reply workflow** | P0 主交互之一 | 删除，从 spec 列表废弃 |
+| **Enter Capture workflow** | P0 主交互之一 | 删除，从 spec 列表废弃 |
+| **Calendar 来源** | Enter Capture 触发 | Chat panel 触发（agent tool call）|
+| **Provider 数据** | `provider_profiles`（一行全包）| 三层：`app_settings` + `ai_provider_configs` + `provider_capability_results` |
+| **STT** | 没在 P0 | P0 一等公民：`stt_provider_configs` + mic + system audio loopback |
+| **更新** | 手动下 DMG | 应用内 `tauri-plugin-updater`；渠道 stable / latest / manual |
+| **抗录屏** | 没要求 | 气泡 `sharingType = .none`；workflow capture 永远隐藏气泡 |
+
+### 9.2 文档 / Spec 状态
+
+#### OpenSpec
+
+- 新增 `v2/openspec/changes/architecture-v2-product-shape/`：
+  - `proposal.md`
+  - `design.md`
+  - `tasks.md`
+  - `specs/chat-panel/spec.md`
+  - `specs/bubble-mac/spec.md`
+  - `specs/stt-byok/spec.md`
+  - `specs/updater-and-anti-capture/spec.md`
+- baseline specs 改写：
+  - `intelligence-byok` — 三层 BYOK
+  - `ask-screen` — 砍 Refresh、砍选区
+  - `calendar` — 来源换成 chat
+  - `app-readiness-onboarding` — 删 Enter Capture 行
+  - `screen-permissions` — 删区域 overlay、加 anti-capture
+- baseline specs 废弃：
+  - `reply-suggestion` — 标 DEPRECATED，保留历史内容
+  - `enter-capture` — 标 DEPRECATED，保留历史内容
+
+#### 根目录 docs
+
+- `docs/prd-local-first-rebuild.md` — 全面重写到 v0.2
+- `docs/technical-architecture-local-first-rebuild.md` — 全面重写到 v0.2
+- `docs/core-workflows-reply-enter-capture.md` → 重命名为 `docs/core-workflows-chat-panel.md`，全面重写
+- `docs/product-interaction-design-guidelines.md` — 全面重写到 v0.2
+- `v2/README.md` — 改写
+- `docs/current-state.md` — 本节追加；不修改用户之前的删除首行改动
+
+### 9.3 v2 当前实现进度
+
+- OpenSpec baseline + 第一批 spec（intelligence-byok / ask-screen / calendar / app-readiness / screen-permissions）已写。
+- Tauri readiness shell 已落地（theme / i18n / permissions 静态展示）。
+- 第一版 BYOK slice 已实现（`byok.rs` / `services/intelligence/*` / Settings -> Intelligence 表单），**未提交到 baseline**，是工作区里 `architecture-v2-product-shape` 之外的另一组改动。
+- 后续 implementation change 的计划已写在 `architecture-v2-product-shape/tasks.md`：
+  1. `implement-byok-data-model-v2`
+  2. `implement-bubble-mac`
+  3. `implement-chat-panel`
+  4. `implement-stt-byok`
+  5. `implement-updater`
+  6. `deprecate-reply-and-enter`
+
+### 9.4 当前的未提交工作区
+
+工作区里有三类改动未提交，按提交顺序整理：
+
+1. `docs/current-state.md` — 用户的删除首行改动
+2. `v2/openspec/changes/architecture-v2-product-shape/` — 本次重整（OpenSpec change）
+3. `v2/openspec/specs/intelligence-byok/spec.md` + `v2/openspec/changes/design-intelligence-byok/` + 第一版 BYOK Rust + React 改动 — 上一阶段工作产物
+
+第三组在 v2 P0 重整后整体会被 `implement-byok-data-model-v2` 替换，是否回滚到提交前由用户决定。
