@@ -79,7 +79,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -89,6 +90,7 @@ button {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -879,7 +881,8 @@ a:focus-visible {
   font-weight: 700;
 }
 
-.field-row input {
+.field-row input,
+.field-row select {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border);
@@ -890,10 +893,118 @@ a:focus-visible {
   padding: 8px 10px;
 }
 
+.field-row input[readonly] {
+  color: var(--muted-strong);
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 2px 0 12px;
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: hsl(var(--primary-hsl));
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.status-message {
+  border-radius: 7px;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0 0 12px;
+  padding: 9px 10px;
+}
+
+.status-message.success {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+}
+
+.status-message.error {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+.profile-list {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  color: var(--text);
+  cursor: pointer;
+  padding: 10px;
+  text-align: left;
+}
+
+.profile-row[data-active="true"] {
+  border-color: color-mix(in srgb, var(--focus) 55%, var(--border));
+  background: color-mix(in srgb, var(--focus) 8%, var(--panel-subtle));
+}
+
+.profile-row strong,
+.profile-row span {
+  display: block;
+}
+
+.profile-row span {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.profile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.test-pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 7px;
+}
+
+.test-pill[data-ready="true"] {
+  border-color: color-mix(in srgb, var(--green) 55%, var(--border));
+  color: var(--green);
+}
+
+.empty-state.compact {
+  box-shadow: none;
+  padding: 12px;
 }
 
 .settings-card-header {
@@ -995,7 +1106,8 @@ a:focus-visible {
   .quick-actions,
   .desktop-preview-grid,
   .capability-list.compact,
-  .trust-grid {
+  .trust-grid,
+  .field-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1014,7 +1126,9 @@ a:focus-visible {
   .quick-actions,
   .desktop-preview-grid,
   .capability-list.compact,
-  .trust-grid {
+  .trust-grid,
+  .field-grid,
+  .profile-row {
     grid-template-columns: 1fr;
   }
 

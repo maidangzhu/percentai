@@ -23,6 +23,14 @@ import { useAppShellStore, type AppRoute, type SettingsSection } from "./appShel
 import { useI18n } from "../i18n/I18nProvider";
 import { getReadinessSnapshot } from "../services/readiness/readinessService";
 import { openNativePermissionSettings } from "../services/native/nativeClient";
+import {
+  loadProviderProfiles,
+  runProviderCapabilityTest,
+  saveProviderProfileForm,
+  type ProviderProfileForm,
+} from "../services/intelligence/providerProfileService";
+import { getProviderPreset, providerPresets } from "../services/intelligence/providerPresets";
+import type { ProviderPresetId, ProviderProfile } from "../services/intelligence/providerTypes";
 import type {
   CapabilityState,
   CapabilityStatus,
@@ -502,6 +510,110 @@ function IntelligenceSettings({ readiness }: { readiness: ReadinessSnapshot }) {
     capability.key.startsWith("provider_"),
   );
   const { t } = useI18n();
+  const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
+  const [keyAvailability, setKeyAvailability] = useState<Record<string, boolean>>({});
+  const [form, setForm] = useState<ProviderProfileForm>(() => defaultProviderForm());
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState<"text" | "image" | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const selectedPreset = getProviderPreset(form.providerPresetId);
+
+  useEffect(() => {
+    let mounted = true;
+
+    loadProviderProfiles()
+      .then((snapshot) => {
+        if (!mounted) {
+          return;
+        }
+        setProfiles(snapshot.profiles);
+        setKeyAvailability(
+          Object.fromEntries(
+            snapshot.keyAvailability.map((item) => [item.profileId, item.hasApiKey]),
+          ),
+        );
+        if (snapshot.defaultProfile) {
+          setForm(formFromProfile(snapshot.defaultProfile));
+        }
+      })
+      .catch((error) => {
+        if (mounted) {
+          setErrorMessage(formatError(error));
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  async function refreshProfiles(nextProfileId?: string) {
+    const snapshot = await loadProviderProfiles();
+    setProfiles(snapshot.profiles);
+    setKeyAvailability(
+      Object.fromEntries(snapshot.keyAvailability.map((item) => [item.profileId, item.hasApiKey])),
+    );
+    const nextProfile =
+      snapshot.profiles.find((profile) => profile.id === nextProfileId) ??
+      snapshot.defaultProfile ??
+      snapshot.profiles[0];
+    if (nextProfile) {
+      setForm(formFromProfile(nextProfile));
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const saved = await saveProviderProfileForm(form);
+      await refreshProfiles(saved.id);
+      setStatusMessage(t("settings.providerSaved"));
+    } catch (error) {
+      setErrorMessage(formatError(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTest(testKind: "text" | "image") {
+    if (!form.id) {
+      setErrorMessage(t("settings.saveBeforeTest"));
+      return;
+    }
+
+    setTesting(testKind);
+    setErrorMessage(null);
+    setStatusMessage(null);
+    try {
+      const result = await runProviderCapabilityTest(form.id, testKind);
+      await refreshProfiles(form.id);
+      if (result.status === "succeeded") {
+        setStatusMessage(testKind === "text" ? t("settings.textTestPassed") : t("settings.imageTestPassed"));
+      } else {
+        setErrorMessage(result.normalizedErrorMessage ?? t("settings.testFailed"));
+      }
+    } catch (error) {
+      setErrorMessage(formatError(error));
+    } finally {
+      setTesting(null);
+    }
+  }
+
+  function updatePreset(providerPresetId: ProviderPresetId) {
+    const preset = getProviderPreset(providerPresetId);
+    setForm({
+      id: undefined,
+      displayName: preset.displayName,
+      providerPresetId,
+      baseUrl: preset.defaultBaseUrl ?? "",
+      modelId: preset.defaultModelId,
+      apiKey: "",
+      isDefault: profiles.length === 0,
+    });
+  }
 
   return (
     <div className="page-stack">
@@ -511,32 +623,182 @@ function IntelligenceSettings({ readiness }: { readiness: ReadinessSnapshot }) {
         <p>{t("settings.intelligenceDescription")}</p>
       </header>
       <div className="form-shell">
-        <div className="field-row">
-          <label htmlFor="provider-display">{t("settings.providerProfile")}</label>
-          <input id="provider-display" name="provider-display" value={t("settings.noProvider")} readOnly />
+        <div className="settings-card-header">
+          <div>
+            <p className="eyebrow">BYOK</p>
+            <h2>{t("settings.providerProfile")}</h2>
+          </div>
+          <StateBadge state={profiles.length > 0 ? "degraded" : "not_configured"} />
         </div>
         <div className="field-row">
-          <label htmlFor="model-display">{t("settings.model")}</label>
-          <input id="model-display" name="model-display" value={t("settings.modelPlaceholder")} readOnly />
+          <label htmlFor="provider-preset">{t("settings.providerPreset")}</label>
+          <select
+            id="provider-preset"
+            value={form.providerPresetId}
+            onChange={(event) => updatePreset(event.target.value as ProviderPresetId)}
+          >
+            {providerPresets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.displayName}
+              </option>
+            ))}
+          </select>
         </div>
+        <div className="field-row">
+          <label htmlFor="provider-display-name">{t("settings.displayName")}</label>
+          <input
+            id="provider-display-name"
+            value={form.displayName}
+            onChange={(event) => setForm({ ...form, displayName: event.target.value })}
+          />
+        </div>
+        <div className="field-grid">
+          <div className="field-row">
+            <label htmlFor="provider-base-url">{t("settings.baseUrl")}</label>
+            <input
+              id="provider-base-url"
+              value={form.baseUrl}
+              placeholder={selectedPreset.defaultBaseUrl ?? "https://provider.example/v1"}
+              readOnly={!selectedPreset.requiresBaseUrl && form.providerPresetId !== "custom_openai"}
+              onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
+            />
+          </div>
+          <div className="field-row">
+            <label htmlFor="model-display">{t("settings.model")}</label>
+            <input
+              id="model-display"
+              value={form.modelId}
+              placeholder={selectedPreset.modelIdPlaceholder}
+              onChange={(event) => setForm({ ...form, modelId: event.target.value })}
+            />
+          </div>
+        </div>
+        <div className="field-row">
+          <label htmlFor="provider-api-key">{t("settings.apiKey")}</label>
+          <input
+            id="provider-api-key"
+            type="password"
+            value={form.apiKey}
+            placeholder={form.id && keyAvailability[form.id] ? t("settings.apiKeySaved") : t("settings.apiKeyPlaceholder")}
+            autoComplete="off"
+            onChange={(event) => setForm({ ...form, apiKey: event.target.value })}
+          />
+        </div>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={form.isDefault}
+            onChange={(event) => setForm({ ...form, isDefault: event.target.checked })}
+          />
+          <span>{t("settings.makeDefaultProvider")}</span>
+        </label>
+        {statusMessage ? <p className="status-message success">{statusMessage}</p> : null}
+        {errorMessage ? <p className="status-message error">{errorMessage}</p> : null}
         <div className="button-row">
-          <button className="secondary-button" type="button" disabled title={t("settings.providerStorageMissing")}>
-            {t("settings.saveProvider")}
+          <button className="primary-button" type="button" disabled={saving} onClick={handleSave}>
+            {saving ? t("common.saving") : t("settings.saveProvider")}
           </button>
-          <button className="secondary-button" type="button" disabled title={t("settings.addProviderBeforeText")}>
-            {t("settings.testText")}
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!form.id || testing !== null}
+            onClick={() => void handleTest("text")}
+          >
+            {testing === "text" ? t("common.testing") : t("settings.testText")}
           </button>
-          <button className="secondary-button" type="button" disabled title={t("settings.addProviderBeforeImage")}>
-            {t("settings.testImage")}
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!form.id || testing !== null}
+            onClick={() => void handleTest("image")}
+          >
+            {testing === "image" ? t("common.testing") : t("settings.testImage")}
           </button>
-          <button className="secondary-button" type="button" disabled title={t("settings.addProviderBeforeStreaming")}>
+          <button className="secondary-button" type="button" disabled title={t("settings.streamingDeferred")}>
             {t("settings.testStreaming")}
           </button>
+        </div>
+      </div>
+
+      <div className="form-shell">
+        <div className="settings-card-header">
+          <div>
+            <p className="eyebrow">{t("settings.savedProfiles")}</p>
+            <h2>{profiles.length ? `${profiles.length} ${t("settings.profiles")}` : t("settings.noProvider")}</h2>
+          </div>
+        </div>
+        <div className="profile-list">
+          {profiles.length === 0 ? (
+            <div className="empty-state compact">
+              <CircleHelp aria-hidden="true" size={18} />
+              <div>
+                <strong>{t("settings.noProvider")}</strong>
+                <p>{t("settings.addProviderFirst")}</p>
+              </div>
+            </div>
+          ) : null}
+          {profiles.map((profile) => (
+            <button
+              className="profile-row"
+              data-active={form.id === profile.id}
+              key={profile.id}
+              type="button"
+              onClick={() => setForm(formFromProfile(profile))}
+            >
+              <div>
+                <strong>{profile.displayName}</strong>
+                <span>
+                  {profile.modelId} · {keyAvailability[profile.id] ? t("settings.keychainReady") : t("settings.keyMissing")}
+                </span>
+              </div>
+              <div className="profile-badges">
+                {profile.isDefault ? <StateBadge state="ready" /> : null}
+                <span className="test-pill" data-ready={profile.supportsText}>
+                  Text
+                </span>
+                <span className="test-pill" data-ready={profile.supportsImage}>
+                  Image
+                </span>
+              </div>
+            </button>
+          ))}
         </div>
       </div>
       <CapabilityList capabilities={providerCapabilities} />
     </div>
   );
+}
+
+function defaultProviderForm(): ProviderProfileForm {
+  const preset = providerPresets[0];
+  return {
+    displayName: preset.displayName,
+    providerPresetId: preset.id,
+    baseUrl: preset.defaultBaseUrl ?? "",
+    modelId: preset.defaultModelId,
+    apiKey: "",
+    isDefault: true,
+  };
+}
+
+function formFromProfile(profile: ProviderProfile): ProviderProfileForm {
+  return {
+    id: profile.id,
+    displayName: profile.displayName,
+    providerPresetId: profile.providerPresetId,
+    baseUrl: profile.baseUrl ?? "",
+    modelId: profile.modelId,
+    apiKey: "",
+    isDefault: profile.isDefault,
+  };
+}
+
+function formatError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }
 
 function PermissionSettings({ readiness }: { readiness: ReadinessSnapshot }) {

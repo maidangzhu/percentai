@@ -1,0 +1,88 @@
+import type { ProviderPreset, ProviderPresetId } from "./providerTypes";
+
+export const providerPresets: ProviderPreset[] = [
+  {
+    id: "openai",
+    displayName: "OpenAI",
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    requiresBaseUrl: false,
+    supportsModelList: true,
+    defaultModelId: "gpt-4.1-mini",
+    modelIdPlaceholder: "gpt-4.1-mini",
+  },
+  {
+    id: "custom_openai",
+    displayName: "Custom OpenAI-Compatible",
+    protocol: "openai-compatible",
+    defaultBaseUrl: null,
+    requiresBaseUrl: true,
+    supportsModelList: false,
+    defaultModelId: "",
+    modelIdPlaceholder: "provider/model-id",
+  },
+  {
+    id: "minimax",
+    displayName: "MiniMax",
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://api.minimaxi.com/v1",
+    requiresBaseUrl: false,
+    supportsModelList: false,
+    defaultModelId: "MiniMax-M3",
+    modelIdPlaceholder: "MiniMax-M3",
+  },
+  {
+    id: "anthropic",
+    displayName: "Anthropic",
+    protocol: "anthropic",
+    defaultBaseUrl: "https://api.anthropic.com/v1",
+    requiresBaseUrl: false,
+    supportsModelList: false,
+    defaultModelId: "claude-3-5-sonnet-latest",
+    modelIdPlaceholder: "claude-3-5-sonnet-latest",
+  },
+  {
+    id: "gemini",
+    displayName: "Gemini",
+    protocol: "gemini",
+    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    requiresBaseUrl: false,
+    supportsModelList: false,
+    defaultModelId: "gemini-1.5-pro",
+    modelIdPlaceholder: "gemini-1.5-pro",
+  },
+  {
+    id: "deepseek",
+    displayName: "DeepSeek",
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://api.deepseek.com/v1",
+    requiresBaseUrl: false,
+    supportsModelList: false,
+    defaultModelId: "deepseek-chat",
+    modelIdPlaceholder: "deepseek-chat",
+  },
+  {
+    id: "moonshot",
+    displayName: "Moonshot / Kimi",
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://api.moonshot.cn/v1",
+    requiresBaseUrl: false,
+    supportsModelList: false,
+    defaultModelId: "moonshot-v1-8k",
+    modelIdPlaceholder: "moonshot-v1-8k",
+  },
+  {
+    id: "openrouter",
+    displayName: "OpenRouter",
+    protocol: "openai-compatible",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    requiresBaseUrl: false,
+    supportsModelList: false,
+    defaultModelId: "openai/gpt-4.1-mini",
+    modelIdPlaceholder: "openai/gpt-4.1-mini",
+  },
+];
+
+export function getProviderPreset(id: ProviderPresetId): ProviderPreset {
+  return providerPresets.find((preset) => preset.id === id) ?? providerPresets[0];
+}

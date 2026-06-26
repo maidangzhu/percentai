@@ -1,3 +1,9 @@
+mod byok;
+
+use byok::{
+    ProviderProfile, ProviderProfileInput, ProviderTestResult, RunProviderTestInput,
+    SaveApiKeyResult,
+};
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -34,6 +40,51 @@ fn get_permission_statuses() -> Vec<NativePermissionStatus> {
 #[tauri::command]
 fn open_permission_settings(permission_id: String) -> Result<(), String> {
     open_platform_permission_settings(&permission_id)
+}
+
+#[tauri::command]
+fn list_provider_profiles() -> Result<Vec<ProviderProfile>, String> {
+    byok::list_provider_profiles(&persistent_dir())
+}
+
+#[tauri::command]
+fn get_default_provider_profile() -> Result<Option<ProviderProfile>, String> {
+    byok::get_default_provider_profile(&persistent_dir())
+}
+
+#[tauri::command]
+fn upsert_provider_profile(input: ProviderProfileInput) -> Result<ProviderProfile, String> {
+    byok::upsert_provider_profile(&persistent_dir(), input)
+}
+
+#[tauri::command]
+fn delete_provider_profile(profile_id: String) -> Result<(), String> {
+    byok::delete_provider_profile(&persistent_dir(), profile_id)
+}
+
+#[tauri::command]
+fn set_default_provider_profile(profile_id: String) -> Result<(), String> {
+    byok::set_default_provider_profile(&persistent_dir(), profile_id)
+}
+
+#[tauri::command]
+fn save_provider_api_key(profile_id: String, api_key: String) -> Result<SaveApiKeyResult, String> {
+    byok::save_provider_api_key(&persistent_dir(), profile_id, api_key)
+}
+
+#[tauri::command]
+fn has_provider_api_key(api_key_ref: String) -> Result<bool, String> {
+    byok::has_provider_api_key(api_key_ref)
+}
+
+#[tauri::command]
+fn delete_provider_api_key(api_key_ref: String) -> Result<(), String> {
+    byok::delete_provider_api_key(api_key_ref)
+}
+
+#[tauri::command]
+fn run_provider_profile_test(input: RunProviderTestInput) -> Result<ProviderTestResult, String> {
+    byok::run_provider_profile_test(&persistent_dir(), input)
 }
 
 fn persistent_dir() -> PathBuf {
@@ -172,10 +223,24 @@ fn has_input_monitoring() -> bool {
 
 pub fn run() {
     tauri::Builder::default()
+        .setup(|_| {
+            byok::init_database(&persistent_dir())
+                .map_err(|error| Box::<dyn std::error::Error>::from(error))?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_native_app_info,
             get_permission_statuses,
-            open_permission_settings
+            open_permission_settings,
+            list_provider_profiles,
+            get_default_provider_profile,
+            upsert_provider_profile,
+            delete_provider_profile,
+            set_default_provider_profile,
+            save_provider_api_key,
+            has_provider_api_key,
+            delete_provider_api_key,
+            run_provider_profile_test
         ])
         .run(tauri::generate_context!())
         .expect("error while running Percent v2");

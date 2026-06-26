@@ -4,7 +4,12 @@ import type {
   CoreActionStatus,
   ReadinessSnapshot,
 } from "./readinessTypes";
-import { getNativeAppInfo, getNativePermissionStatuses } from "../native/nativeClient";
+import {
+  getNativeAppInfo,
+  getNativePermissionStatuses,
+  hasNativeProviderApiKey,
+  listNativeProviderProfiles,
+} from "../native/nativeClient";
 
 const now = new Date().toISOString();
 
@@ -189,11 +194,13 @@ const coreActions: CoreActionStatus[] = [
 ];
 
 export async function getReadinessSnapshot(): Promise<ReadinessSnapshot> {
-  const [nativeInfo, nativePermissions] = await Promise.all([
+  const [nativeInfo, nativePermissions, providerReadiness] = await Promise.all([
     getNativeAppInfo().catch(() => null),
     getNativePermissionStatuses().catch(() => null),
+    getProviderReadiness().catch(() => null),
   ]);
-  const mergedCapabilities = mergeNativePermissions(capabilities, nativePermissions);
+  const providerCapabilities = mergeProviderReadiness(capabilities, providerReadiness);
+  const mergedCapabilities = mergeNativePermissions(providerCapabilities, nativePermissions);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -206,6 +213,90 @@ export async function getReadinessSnapshot(): Promise<ReadinessSnapshot> {
     checklist: mergeChecklistWithCapabilities(checklist, mergedCapabilities),
     coreActions: mergeCoreActionsWithCapabilities(coreActions, mergedCapabilities),
   };
+}
+
+async function getProviderReadiness() {
+  const profiles = await listNativeProviderProfiles();
+  const profile = profiles.find((candidate) => candidate.isDefault) ?? profiles[0] ?? null;
+  const hasApiKey = profile?.apiKeyRef ? await hasNativeProviderApiKey(profile.apiKeyRef) : false;
+
+  return {
+    profile,
+    hasApiKey,
+  };
+}
+
+function mergeProviderReadiness(
+  source: CapabilityStatus[],
+  readiness: Awaited<ReturnType<typeof getProviderReadiness>> | null,
+): CapabilityStatus[] {
+  if (!readiness?.profile) {
+    return source;
+  }
+
+  const { profile, hasApiKey } = readiness;
+  const updatedAt = profile.lastTestedAt ?? profile.updatedAt ?? new Date().toISOString();
+  const missingKeyImpact = `${profile.displayName} is saved, but its API key is not available in Keychain.`;
+
+  return source.map((capability) => {
+    if (capability.key === "provider_text") {
+      if (!hasApiKey) {
+        return {
+          ...capability,
+          state: "blocked",
+          impact: missingKeyImpact,
+          nextStep: "Save the provider API key again.",
+          updatedAt,
+        };
+      }
+
+      return {
+        ...capability,
+        state: profile.supportsText ? "ready" : "not_configured",
+        impact: profile.supportsText
+          ? `${profile.displayName} passed Text Test with ${profile.modelId}.`
+          : `${profile.displayName} is saved. Run Text Test to verify it can answer.`,
+        nextStep: profile.supportsText ? "No action needed." : "Run Text Test.",
+        updatedAt,
+      };
+    }
+
+    if (capability.key === "provider_image") {
+      if (!hasApiKey) {
+        return {
+          ...capability,
+          state: "blocked",
+          impact: missingKeyImpact,
+          nextStep: "Save the provider API key again.",
+          updatedAt,
+        };
+      }
+
+      return {
+        ...capability,
+        state: profile.supportsImage ? "ready" : "not_configured",
+        impact: profile.supportsImage
+          ? `${profile.displayName} passed Image Test with ${profile.modelId}.`
+          : `${profile.displayName} is saved. Run Image Test before Reply or Ask Screen.`,
+        nextStep: profile.supportsImage ? "No action needed." : "Run Image Test.",
+        updatedAt,
+      };
+    }
+
+    if (capability.key === "provider_streaming") {
+      return {
+        ...capability,
+        state: profile.supportsStreaming ? "ready" : "unknown",
+        impact: profile.supportsStreaming
+          ? `${profile.displayName} streaming is verified.`
+          : "Streaming is defined but deferred in this BYOK slice.",
+        nextStep: profile.supportsStreaming ? "No action needed." : "Streaming Test comes after Text/Image.",
+        updatedAt,
+      };
+    }
+
+    return capability;
+  });
 }
 
 function mergeNativePermissions(
